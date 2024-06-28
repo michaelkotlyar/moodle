@@ -539,6 +539,11 @@ class settings_provider {
             return true;
         }
 
+        if (!self::can_use_seb_client_config($context) &&
+            $settings->get('requiresafeexambrowser') == self::USE_SEB_CLIENT_CONFIG) {
+            return true;
+        }
+
         if (!self::can_upload_seb_file($context) &&
             $settings->get('requiresafeexambrowser') == self::USE_SEB_UPLOAD_CONFIG) {
             return true;
@@ -575,7 +580,9 @@ class settings_provider {
             $options[self::USE_SEB_UPLOAD_CONFIG] = get_string('seb_use_upload', 'quizaccess_seb');
         }
 
-        $options[self::USE_SEB_CLIENT_CONFIG] = get_string('seb_use_client', 'quizaccess_seb');
+        if (self::can_use_seb_client_config($context) || self::is_conflicting_permissions($context)) {
+            $options[self::USE_SEB_CLIENT_CONFIG] = get_string('seb_use_client', 'quizaccess_seb');
+        }
 
         return $options;
     }
@@ -746,6 +753,16 @@ class settings_provider {
     }
 
     /**
+     * Check if the current user can select to use the SEB client configuration.
+     *
+     * @param \context $context Context to check access in.
+     * @return bool
+     */
+    public static function can_use_seb_client_config(\context $context): bool {
+        return has_capability('quizaccess/seb:manage_seb_usesebclientconfig', $context);
+    }
+
+    /**
      * Check if the current user can use preconfigured templates.
      *
      * @param \context $context Context to check access in.
@@ -792,6 +809,10 @@ class settings_provider {
      * @return bool
      */
     public static function can_configure_manually(\context $context): bool {
+        if (!has_capability('quizaccess/seb:manage_seb_configuremanually', $context)) {
+            return false;
+        }
+
         foreach (self::get_seb_config_elements() as $name => $type) {
             if (self::can_manage_seb_config_setting($name, $context)) {
                 return true;

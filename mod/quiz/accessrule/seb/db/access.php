@@ -49,6 +49,24 @@ $capabilities = [
             'editingteacher' => CAP_ALLOW
         ]
     ],
+    'quizaccess/seb:manage_seb_configuremanually' => [
+        'captype' => 'read',
+        'contextlevel' => CONTEXT_MODULE,
+        'archetypes' => [
+            'manager' => CAP_ALLOW,
+            'editingteacher' => CAP_ALLOW,
+        ],
+        'clonepermissionsfrom' => 'quizaccess/seb:manage_seb_requiresafeexambrowser',
+    ],
+    'quizaccess/seb:manage_seb_usesebclientconfig' => [
+        'captype' => 'read',
+        'contextlevel' => CONTEXT_MODULE,
+        'archetypes' => [
+            'manager' => CAP_ALLOW,
+            'editingteacher' => CAP_ALLOW,
+        ],
+        'clonepermissionsfrom' => 'quizaccess/seb:manage_seb_requiresafeexambrowser',
+    ],
     'quizaccess/seb:manage_seb_templateid' => [
         'captype' => 'read',
         'contextlevel' => CONTEXT_MODULE,
