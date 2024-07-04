@@ -585,11 +585,20 @@ class settings_provider {
      * @return array
      */
     protected static function get_template_options(): array {
+        global $DB, $PAGE;
         $templates = [];
-        $records = template::get_records(['enabled' => 1], 'name');
+        $templatetable = template::TABLE;
+        $sebquizsettingstable = seb_quiz_settings::TABLE;
+        $cmid = $PAGE->cm->id ?? -1;
+        $sql = "SELECT *
+                FROM {{$templatetable}} t
+                WHERE enabled = 1
+                OR EXISTS (SELECT 1 FROM {{$sebquizsettingstable}} WHERE templateid = t.id AND cmid = ?)";
+
+        $records = $DB->get_records_sql($sql, [$cmid]);
         if ($records) {
             foreach ($records as $record) {
-                $templates[$record->get('id')] = $record->get('name');
+                $templates[$record->id] = $record->name;
             }
         }
 
