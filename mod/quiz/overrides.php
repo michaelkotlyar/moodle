@@ -23,6 +23,7 @@
  */
 
 use mod_quiz\quiz_settings;
+use quizaccess_seb\settings_provider;
 
 require_once(__DIR__ . '/../../config.php');
 require_once($CFG->dirroot.'/mod/quiz/lib.php');
@@ -227,6 +228,15 @@ foreach ($overrides as $override) {
         $fields[] = get_string('requirepassword', 'quiz');
         $values[] = $override->password !== '' ?
                 get_string('enabled', 'quiz') : get_string('none', 'quiz');
+    }
+
+    // Safe exam browser.
+    if (isset($override->sebdata)) {
+        $sebdata = unserialize($override->sebdata);
+        if (!!$sebdata['enableseboverride']) {
+            $fields[] = get_string('seb_requiresafeexambrowser', 'quizaccess_seb');
+            $values[] = settings_provider::get_requiresafeexambrowser_options($context)[$sebdata['seb_requiresafeexambrowser']];
+        }
     }
 
     // Prepare the information about who this override applies to.

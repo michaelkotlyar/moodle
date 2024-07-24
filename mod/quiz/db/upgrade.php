@@ -132,6 +132,21 @@ function xmldb_quiz_upgrade($oldversion) {
         upgrade_mod_savepoint(true, 2023112402, 'quiz');
     }
 
+    if ($oldversion < 2024072400) {
+
+        // Define field sebdata to be added to quiz_overrides.
+        $table = new xmldb_table('quiz_overrides');
+        $field = new xmldb_field('sebdata', XMLDB_TYPE_TEXT, null, null, null, null, null, 'password');
+
+        // Conditionally launch add field quizgradeitemid.
+        if (!$dbman->field_exists($table, $field)) {
+            $dbman->add_field($table, $field);
+        }
+
+        // Quiz savepoint reached.
+        upgrade_mod_savepoint(true, 2024072400, 'quiz');
+    }
+
     // Automatically generated Moodle v4.4.0 release upgrade line.
     // Put any upgrade step following this.
 

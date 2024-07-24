@@ -34,6 +34,7 @@ use core\persistent;
 use lang_string;
 use moodle_exception;
 use moodle_url;
+use mod_quiz\quiz_settings;
 
 defined('MOODLE_INTERNAL') || die();
 
@@ -196,11 +197,39 @@ class seb_quiz_settings extends persistent {
      * @return false|\quizaccess_seb\seb_quiz_settings
      */
     public static function get_by_quiz_id(int $quizid) {
-        if ($data = self::get_quiz_settings_cache()->get($quizid)) {
-            return new static(0, $data);
+        global $USER;
+        // Skip cache if quiz has overrides for user.
+        if (!($hasoverrides = quiz_has_user_overrides($quizid))) {
+            if ($data = self::get_quiz_settings_cache()->get($quizid)) {
+                return new static(0, $data);
+            }
         }
 
-        return self::get_record(['quizid' => $quizid]);
+        $quiz = self::get_record(['quizid' => $quizid]);
+
+        // Overwrite settings from override manager if available.
+        if ($hasoverrides) {
+            // Create blank seb_quiz_settings instance if none exists.
+            if (!$quiz) {
+                $record = new \stdClass();
+                $record->quizid = $quizid;
+                $record->cmid = get_coursemodule_from_instance('quiz', $quizid)->id;
+                $quiz = $quiz ?: new self(0, $record);
+            }
+
+            $settings = quiz_settings::create_for_cmid($quiz->get('cmid'), $USER->id)->get_quiz();
+            // If overriding enabled, overwrite seb settings.
+            if (isset($settings->enableseboverride) && !!$settings->enableseboverride) {
+                $prefix = 'seb_';
+                foreach (array_keys(self::properties_definition()) as $key) {
+                    if (isset($settings->{$prefix.$key})) {
+                        $quiz->set($key, $settings->{$prefix.$key});
+                    }
+                }
+            }
+        }
+
+        return $quiz;
     }
 
     /**
@@ -210,10 +239,12 @@ class seb_quiz_settings extends persistent {
      * @return string|null
      */
     public static function get_config_by_quiz_id(int $quizid): ?string {
-        $config = self::get_config_cache()->get($quizid);
-
-        if ($config !== false) {
-            return $config;
+        // Skip cache if quiz has overrides for user.
+        if (!quiz_has_user_overrides($quizid)) {
+            $config = self::get_config_cache()->get($quizid);
+            if ($config !== false) {
+                return $config;
+            }
         }
 
         $config = null;

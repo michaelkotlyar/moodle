@@ -46,6 +46,7 @@ class save_overrides extends external_api {
             'timelimit' => new external_value(PARAM_INT, 'Quiz override time limit', VALUE_DEFAULT, null),
             'attempts' => new external_value(PARAM_INT, 'Quiz override attempt count', VALUE_DEFAULT, null),
             'password' => new external_value(PARAM_TEXT, 'Quiz override password', VALUE_DEFAULT, null),
+            'sebdata' => new external_value(PARAM_TEXT, 'Quiz override SEB settings', VALUE_DEFAULT, null),
         ]);
 
         return new external_function_parameters([

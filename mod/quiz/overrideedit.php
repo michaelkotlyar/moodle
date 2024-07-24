@@ -72,6 +72,15 @@ if ($overrideid) {
     // Editing an override.
     $data = clone $override;
 
+    // Unpack SEB settings into data object.
+    $data->sebdata = unserialize($data->sebdata);
+    if ($data->sebdata->enableseboverride) {
+        foreach ($data->sebdata as $sebkey => $sebval) {
+            $data->{$sebkey} = $sebval;
+        }
+    }
+    unset($data->sebdata);
+
     if ($override->groupid) {
         if (!groups_group_visible($override->groupid, $course, $cm)) {
             throw new \moodle_exception('invalidoverrideid', 'quiz');

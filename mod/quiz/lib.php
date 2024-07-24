@@ -220,6 +220,46 @@ function quiz_delete_instance($id) {
 }
 
 /**
+ * Checks if the user has overrides for the quiz whether individually or in a group.
+ *
+ * @param int $quizid The quiz object.
+ * @return bool
+ */
+function quiz_has_user_overrides($quizid) {
+    global $DB, $USER;
+    $userid = $USER->id;
+
+    $quiz = $DB->get_record('quiz', ['id' => $quizid]);
+
+    // No quiz, no override.
+    if (!$quiz) {
+        return false;
+    }
+
+    // Check for user override.
+    $useroverride = $DB->record_exists('quiz_overrides', ['quiz' => $quiz->id, 'userid' => $userid]);
+    if ($useroverride) {
+        return true;
+    }
+
+    // Check for group overrides.
+    $groupings = groups_get_user_groups($quiz->course, $userid);
+    if (!empty($groupings[0])) {
+        list($extra, $params) = $DB->get_in_or_equal(array_values($groupings[0]));
+        $sql = "SELECT * FROM {quiz_overrides}
+                WHERE groupid $extra AND quiz = ?";
+        $params[] = $quiz->id;
+        $gpoverrides = $DB->record_exists_sql($sql, $params);
+
+        if ($gpoverrides) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+/**
  * Updates a quiz object with override information for a user.
  *
  * Algorithm:  For each quiz setting, if there is a matching user-specific override,
@@ -323,6 +363,14 @@ function quiz_update_effective_access($quiz, $userid) {
     foreach ($keys as $key) {
         if (isset($override->{$key})) {
             $quiz->{$key} = $override->{$key};
+        }
+    }
+
+    // Merge SEB override settings if available.
+    $seboverride = isset($override->sebdata) ? unserialize($override->sebdata) : null;
+    if (!empty($seboverride) && !!$seboverride['enableseboverride']) {
+        foreach ($seboverride as $key => $value) {
+            $quiz->{$key} = $value;
         }
     }
 

@@ -23,6 +23,7 @@ use mod_quiz_mod_form;
 use moodle_url;
 use moodleform;
 use stdClass;
+use quizaccess_seb\{seb_quiz_settings, settings_provider};
 
 defined('MOODLE_INTERNAL') || die();
 
@@ -59,6 +60,9 @@ class edit_override_form extends moodleform {
     /** @var int overrideid, if provided. */
     protected int $overrideid;
 
+    /** @var array array of seb settings to override. */
+    protected array $sebdata;
+
     /**
      * Constructor.
      *
@@ -80,6 +84,7 @@ class edit_override_form extends moodleform {
         $this->groupid = empty($override->groupid) ? 0 : $override->groupid;
         $this->userid = empty($override->userid) ? 0 : $override->userid;
         $this->overrideid = $override->id ?? 0;
+        $this->sebdata = empty($override->sebdata) ? [] : unserialize($override->sebdata);
 
         parent::__construct($submiturl);
     }
@@ -224,6 +229,9 @@ class edit_override_form extends moodleform {
         $mform->addHelpButton('attempts', 'attempts', 'quiz');
         $mform->setDefault('attempts', $this->quiz->attempts);
 
+        // SEB override settings.
+        $this->display_seb_settings($mform);
+
         // Submit buttons.
         $mform->addElement('submit', 'resetbutton',
                 get_string('reverttodefaults', 'quiz'));
@@ -237,6 +245,177 @@ class edit_override_form extends moodleform {
 
         $mform->addGroup($buttonarray, 'buttonbar', '', [' '], false);
         $mform->closeHeaderBefore('buttonbar');
+    }
+
+    /**
+     * Add SEB settings to the form.
+     *
+     * @param \MoodleQuickForm $mform
+     * @return void
+     */
+    protected function display_seb_settings($mform) {
+        $mform->addElement('header', 'seb', get_string('seb', 'quizaccess_seb'));
+
+        $mform->addElement('checkbox', 'enableseboverride', get_string('enabled', 'quizaccess_seb'));
+        $mform->setDefault('enableseboverride', $this->sebdata['enableseboverride'] ?? false);
+
+        // ... "Require the use of Safe Exam Browser"
+        if (settings_provider::can_override_unrequire($this->context)) {
+            $requireseboptions[settings_provider::USE_SEB_NO] = get_string('no');
+        }
+
+        if (settings_provider::can_configure_manually($this->context) || settings_provider::is_conflicting_permissions($this->context)) {
+            $requireseboptions[settings_provider::USE_SEB_CONFIG_MANUALLY] = get_string('seb_use_manually', 'quizaccess_seb');
+        }
+
+        if (settings_provider::can_use_seb_template($this->context) || settings_provider::is_conflicting_permissions($this->context)) {
+            if (!empty(settings_provider::get_template_options())) {
+                $requireseboptions[settings_provider::USE_SEB_TEMPLATE] = get_string('seb_use_template', 'quizaccess_seb');
+            }
+        }
+
+        $requireseboptions[settings_provider::USE_SEB_CLIENT_CONFIG] = get_string('seb_use_client', 'quizaccess_seb');
+
+        $mform->addElement(
+            'select',
+            'seb_requiresafeexambrowser',
+            get_string('seb_requiresafeexambrowser', 'quizaccess_seb'),
+            $requireseboptions
+        );
+
+        $mform->setType('seb_requiresafeexambrowser', PARAM_INT);
+        $mform->setDefault(
+            'seb_requiresafeexambrowser',
+            $this->sebdata['seb_requiresafeexambrowser'] ?? $this->quiz->seb_requiresafeexambrowser ?? 0
+        );
+        $mform->addHelpButton('seb_requiresafeexambrowser', 'seb_requiresafeexambrowser', 'quizaccess_seb');
+        $mform->disabledIf('seb_requiresafeexambrowser', 'enableseboverride');
+
+        if (settings_provider::is_conflicting_permissions($this->context)) {
+            $mform->freeze('seb_requiresafeexambrowser');
+        }
+
+        // ... "Safe Exam Browser config template"
+        if (settings_provider::can_use_seb_template($this->context) ||
+            settings_provider::is_conflicting_permissions($this->context)) {
+            $element = $mform->addElement(
+                'select',
+                'seb_templateid',
+                get_string('seb_templateid', 'quizaccess_seb'),
+                settings_provider::get_template_options()
+            );
+        } else {
+            $element = $mform->addElement('hidden', 'seb_templateid');
+        }
+
+        $mform->setType('seb_templateid', PARAM_INT);
+        $mform->setDefault('seb_templateid', $this->sebdata['seb_templateid'] ?? $this->quiz->seb_templateid ?? 0);
+        $mform->addHelpButton('seb_templateid', 'seb_templateid', 'quizaccess_seb');
+        $mform->disabledIf('seb_templateid', 'enableseboverride');
+
+        if (settings_provider::is_conflicting_permissions($this->context)) {
+            $mform->freeze('seb_templateid');
+        }
+
+        // ... "Show Safe Exam browser download button"
+        if (settings_provider::can_change_seb_showsebdownloadlink($this->context)) {
+            $mform->addElement('selectyesno',
+                'seb_showsebdownloadlink',
+                get_string('seb_showsebdownloadlink', 'quizaccess_seb')
+            );
+
+            $mform->setType('seb_showsebdownloadlink', PARAM_BOOL);
+            $mform->setDefault(
+                'seb_showsebdownloadlink',
+                $this->sebdata['seb_showsebdownloadlink'] ?? $this->quiz->seb_showsebdownloadlink ?? 1
+            );
+            $mform->addHelpButton('seb_showsebdownloadlink', 'seb_showsebdownloadlink', 'quizaccess_seb');
+            $mform->disabledIf('seb_showsebdownloadlink', 'enableseboverride');
+        }
+
+        // Manual config elements.
+        $defaults = settings_provider::get_seb_config_element_defaults();
+        $types = settings_provider::get_seb_config_element_types();
+
+        foreach (settings_provider::get_seb_config_elements() as $name => $type) {
+            if (!settings_provider::can_manage_seb_config_setting($name, $this->context)) {
+                $type = 'hidden';
+            }
+
+            $mform->addElement($type, $name, get_string($name, 'quizaccess_seb'));
+
+            $mform->addHelpButton($name, $name, 'quizaccess_seb');
+            $mform->setType('seb_showsebdownloadlink', PARAM_BOOL);
+            $mform->setDefault(
+                'seb_showsebdownloadlink',
+                $this->sebdata['seb_showsebdownloadlink'] ?? $this->quiz->seb_showsebdownloadlink ?? 1
+            );
+            $mform->disabledIf($name, 'enableseboverride');
+
+            if (isset($defaults[$name])) {
+                $mform->setDefault($name, $this->sebdata[$name] ?? $this->quiz->{$name} ?? $defaults[$name]);
+            }
+
+            if (isset($types[$name])) {
+                $mform->setType($name, $types[$name]);
+            }
+        }
+
+        if (settings_provider::can_change_seb_allowedbrowserexamkeys($this->context)) {
+            $mform->addElement('textarea',
+                'seb_allowedbrowserexamkeys',
+                get_string('seb_allowedbrowserexamkeys', 'quizaccess_seb')
+            );
+
+            $mform->setType('seb_allowedbrowserexamkeys', PARAM_RAW);
+            $mform->setDefault(
+                'seb_allowedbrowserexamkeys',
+                $this->sebdata['seb_allowedbrowserexamkeys'] ?? $this->quiz->seb_allowedbrowserexamkeys ?? ''
+            );
+            $mform->addHelpButton('seb_allowedbrowserexamkeys', 'seb_allowedbrowserexamkeys', 'quizaccess_seb');
+            $mform->disabledIf('seb_allowedbrowserexamkeys', 'enableseboverride');
+        }
+
+        // Hideifs.
+        foreach (settings_provider::get_quiz_hideifs() as $elname => $rules) {
+            if ($mform->elementExists($elname)) {
+                foreach ($rules as $hideif) {
+                    $mform->hideIf(
+                        $hideif->get_element(),
+                        $hideif->get_dependantname(),
+                        $hideif->get_condition(),
+                        $hideif->get_dependantvalue()
+                    );
+                }
+            }
+        }
+
+        // Lock elements.
+        if (settings_provider::is_conflicting_permissions($this->context)) {
+            // Freeze common quiz settings.
+            $mform->addElement('enableseboverride');
+            $mform->freeze('seb_requiresafeexambrowser');
+            $mform->freeze('seb_templateid');
+            $mform->freeze('seb_showsebdownloadlink');
+            $mform->freeze('seb_allowedbrowserexamkeys');
+
+            $quizsettings = seb_quiz_settings::get_by_quiz_id((int) $this->quiz->id);
+
+            // Remove template ID if not using template for this quiz.
+            if (empty($quizsettings) || $quizsettings->get('requiresafeexambrowser') != settings_provider::USE_SEB_TEMPLATE) {
+                $mform->removeElement('seb_templateid');
+            }
+
+            // Freeze all SEB specific settings.
+            foreach (settings_provider::get_seb_config_elements() as $element => $type) {
+                if ($mform->elementExists($element)) {
+                    $mform->freeze($element);
+                }
+            }
+        }
+
+        // Close header before next field.
+        $mform->closeHeaderBefore('resetbutton');
     }
 
     /**

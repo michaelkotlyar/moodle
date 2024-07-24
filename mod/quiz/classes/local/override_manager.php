@@ -32,7 +32,34 @@ use mod_quiz\event\user_override_updated;
  */
 class override_manager {
     /** @var array quiz setting keys that can be overwritten **/
-    private const OVERRIDEABLE_QUIZ_SETTINGS = ['timeopen', 'timeclose', 'timelimit', 'attempts', 'password'];
+    private const OVERRIDEABLE_QUIZ_SETTINGS = ['timeopen', 'timeclose', 'timelimit', 'attempts', 'password', 'enableseboverride'];
+
+    /** @var array quiz SEB setting keys that can be overwritten **/
+    private const OVERRIDEABLE_QUIZ_SEB_SETTINGS = [
+        'seb_activateurlfiltering',
+        'seb_allowedbrowserexamkeys',
+        'seb_allowreloadinexam',
+        'seb_allowspellchecking',
+        'seb_allowuserquitseb',
+        'seb_enableaudiocontrol',
+        'seb_expressionsallowed',
+        'seb_expressionsblocked',
+        'seb_filterembeddedcontent',
+        'seb_linkquitseb',
+        'seb_muteonstartup',
+        'seb_quitpassword',
+        'seb_regexallowed',
+        'seb_regexblocked',
+        'seb_requiresafeexambrowser',
+        'seb_showkeyboardlayout',
+        'seb_showreloadbutton',
+        'seb_showsebdownloadlink',
+        'seb_showsebtaskbar',
+        'seb_showtime',
+        'seb_showwificontrol',
+        'seb_templateid',
+        'seb_userconfirmquit',
+    ];
 
     /**
      * Create override manager
@@ -54,6 +81,15 @@ class override_manager {
         if (empty($quiz->cmid) || $quiz->cmid != $context->instanceid) {
             throw new \coding_exception("Given context does not match the quiz object");
         }
+    }
+
+    /**
+     * Retrieve list of overridable quiz settings.
+     *
+     * @return array of quiz settings
+     */
+    private static function get_overridable_quiz_settings() {
+        return [...self::OVERRIDEABLE_QUIZ_SETTINGS, ...self::OVERRIDEABLE_QUIZ_SEB_SETTINGS];
     }
 
     /**
@@ -88,7 +124,7 @@ class override_manager {
         // Ensure at least one of the overrideable settings is set.
         $keysthatareset = array_map(function ($key) use ($formdata) {
             return isset($formdata->$key) && !is_null($formdata->$key);
-        }, self::OVERRIDEABLE_QUIZ_SETTINGS);
+        }, [...self::OVERRIDEABLE_QUIZ_SETTINGS]);
 
         if (!in_array(true, $keysthatareset)) {
             $errors['general'][] = new \lang_string('nooverridedata', 'quiz');
@@ -215,7 +251,7 @@ class override_manager {
      */
     public function parse_formdata(array $formdata): array {
         // Get the data from the form that we want to update.
-        $settings = array_intersect_key($formdata, array_flip(self::OVERRIDEABLE_QUIZ_SETTINGS));
+        $settings = array_intersect_key($formdata, array_flip(self::get_overridable_quiz_settings()));
 
         // Remove values that are the same as currently in the quiz.
         $settings = $this->clear_unused_values($settings);
@@ -238,6 +274,12 @@ class override_manager {
 
         // Extract only the necessary data.
         $datatoset = $this->parse_formdata($formdata);
+
+        // Create sebdata field value.
+        $sebdata = array_intersect_key($datatoset, array_flip(['enableseboverride', ...self::OVERRIDEABLE_QUIZ_SEB_SETTINGS]));
+        $sebdata = serialize($sebdata);
+
+        $datatoset['sebdata'] = $sebdata;
         $datatoset['quiz'] = $this->quiz->id;
 
         // Validate the data is OK.
@@ -568,6 +610,7 @@ class override_manager {
 
         return $formdata;
     }
+
 
     /**
      * Deletes orphaned group overrides in a given course.
