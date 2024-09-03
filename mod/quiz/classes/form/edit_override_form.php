@@ -103,7 +103,7 @@ class edit_override_form extends moodleform {
 
     /**
      * Get the quiz object.
-     * @return int
+     * @return \stdClass
      */
     public function get_quiz() {
         return $this->quiz;
