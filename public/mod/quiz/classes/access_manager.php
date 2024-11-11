@@ -17,10 +17,12 @@
 namespace mod_quiz;
 
 use core_component;
+use mod_quiz\form\edit_override_form;
 use mod_quiz\form\preflight_check_form;
 use mod_quiz\local\access_rule_base;
 use mod_quiz\output\renderer;
 use mod_quiz\question\display_options;
+use context_module;
 use mod_quiz_mod_form;
 use moodle_page;
 use moodle_url;
@@ -48,6 +50,9 @@ class access_manager {
     /** @var access_rule_base instances of the active rules for this quiz. */
     protected $rules = [];
 
+    /** @var array list of override controller classes. */
+    protected $overriderules = [];
+
     /**
      * Create an instance for a particular quiz.
      *
@@ -61,6 +66,7 @@ class access_manager {
         $this->quizobj = $quizobj;
         $this->timenow = $timenow;
         $this->rules = $this->make_rules($quizobj, $timenow, $canignoretimelimits);
+        $this->overriderules = self::get_override_rule_classes();
     }
 
     /**
@@ -101,6 +107,15 @@ class access_manager {
      */
     protected static function get_rule_classes(): array {
         return core_component::get_plugin_list_with_class('quizaccess', '', 'rule.php');
+    }
+
+    /**
+     * Get the names of overridable rule classes.
+     *
+     * @return array of class names.
+     */
+    protected static function get_override_rule_classes(): array {
+        return core_component::get_plugin_list_with_class('quizaccess', 'overrides_controller');
     }
 
     /**
@@ -277,6 +292,170 @@ class access_manager {
         }
 
         return $quiz;
+    }
+
+    /**
+     * Add any form fields that the access rules require to the override form.
+     *
+     * Note that the standard plugins do not use this mechanism, becuase all their
+     * settings are stored in the quiz table.
+     *
+     * @param edit_override_form $form
+     * @return bool return true if fields have been added.
+     */
+    public static function add_override_form_fields(edit_override_form $form): bool {
+        $fieldsadded = false;
+        foreach (self::get_override_rule_classes() as $rule) {
+            $rule::add_form_fields($form);
+            $fieldsadded = true;
+        }
+        return $fieldsadded;
+    }
+
+    /**
+     * Validate the data from any form fields added using {@see add_override_form_fields()}.
+     *
+     * TODO: PHPDOC
+     *
+     * @param array $errors the errors found so far
+     * @param array $data the submitted form data
+     * @param array $files information about any uploaded files
+     * @param edit_override_form $mform the form to validate
+     * @return array $errors the updated $errors array
+     */
+    public static function validate_override_form_fields(
+        array $errors,
+        array $data,
+        array $files,
+        edit_override_form $mform,
+    ): array {
+        foreach (self::get_override_rule_classes() as $rule) {
+            $errors = $rule::validate_form_fields($errors, $data, $files, $mform);
+        }
+        return $errors;
+    }
+
+    /**
+     * Save any submitted settings when the quiz override settings form is submitted.
+     *
+     * TODO: PHPDOC
+     *
+     * @param array $override data from the override form.
+     */
+    public static function save_override_settings(array $override): void {
+        foreach (self::get_override_rule_classes() as $rule) {
+            $rule::save_settings($override);
+        }
+    }
+
+    /**
+     * Delete any rule-specific override settings when the quiz override is deleted.
+     *
+     * TODO: PHPDOC
+     *
+     * @param int $quizid all overrides being deleted should belong to the same quiz.
+     * @param array $overrides an array of override objects to be deleted.
+     */
+    public static function delete_override_settings(int $quizid, array $overrides): void {
+        foreach (self::get_override_rule_classes() as $rule) {
+            $rule::delete_settings($quizid, $overrides);
+        }
+    }
+
+    /**
+     * Get components of the SQL query to fetch the access rule components' override
+     * settings. To be used as part of a quiz_override query to reference.
+     *
+     * TODO: PHPDOC
+     *
+     * @param string $overridetablename Name of the table to reference for joins.
+     * @return array 'selects', 'joins' and 'params'.
+     */
+    public static function get_override_settings_sql(string $overridetablename = 'quiz_overrides'): array {
+        $allfields = [];
+        $alljoins = [];
+        $allparams = [];
+
+        foreach (self::get_override_rule_classes() as $rule) {
+            [$fields, $joins, $params] = $rule::get_settings_sql($overridetablename);
+            $allfields = array_merge($allfields, $fields);
+            $alljoins = array_merge($alljoins, $joins);
+            $allparams = array_merge($allparams, $params);
+        }
+
+        $allfields = implode(', ', $allfields);
+        $alljoins = implode(' ', $alljoins);
+
+        return [$allfields, $alljoins, $allparams];
+    }
+
+    /**
+     * Retrieve all keys of fields to be used in the override form.
+     *
+     * TODO: PHPDOC
+     *
+     * @return array
+     */
+    public static function get_override_setting_names(): array {
+        $keys = [];
+        foreach (self::get_override_rule_classes() as $rule) {
+            $keys += $rule::get_settings();
+        }
+        return $keys;
+    }
+
+    /**
+     * Retrieve keys of fields that are required to be filled in.
+     *
+     * TODO: PHPDOC
+     *
+     * @return array
+     */
+    public static function get_override_required_settings(): array {
+        $keys = [];
+        foreach (self::get_override_rule_classes() as $rule) {
+            $keys += $rule::get_required_settings();
+        }
+        return $keys;
+    }
+
+    /**
+     * Clean override form data specifc to access rule.
+     *
+     * We clean the form data for each access rule in the case that key values are 'empty' or will have not effect in the override.
+     * This is to ensure that on form submission, the validation can check that any override settings are actually filled in.
+     *
+     * @param array $formdata
+     * @return array cleaned form data
+     */
+    public static function clean_override_form_data(array $formdata): array {
+        foreach (self::get_override_rule_classes() as $rule) {
+            $formdata = $rule::clean_form_data($formdata);
+        }
+        return $formdata;
+    }
+
+    /**
+     * Add fields and values of the of overridden access rules to be displayed on the override HTML table.
+     *
+     * TODO: PHPDOC
+     *
+     * @param stdClass $override the override data to use to update the $fields and $values.
+     * @param array $fields the access rule fields to display.
+     * @param array $values the value of the field at the same index.
+     * @param context_module $context the context of which the override is being applied to.
+     * @return array an array of the updated fields and values, e.g. [$fields, $values]
+     */
+    public static function add_override_table_fields(
+        stdClass $override,
+        array $fields,
+        array $values,
+        context_module $context,
+    ): array {
+        foreach (self::get_override_rule_classes() as $rule) {
+            [$fields, $values] = $rule::add_table_fields($override, $fields, $values, $context);
+        }
+        return [$fields, $values];
     }
 
     /**

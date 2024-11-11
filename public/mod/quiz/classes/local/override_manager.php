@@ -17,8 +17,10 @@
 namespace mod_quiz\local;
 
 use context_course;
+use core_component;
 use core_group\hook\after_group_membership_added;
 use core_group\hook\after_group_membership_removed;
+use mod_quiz\access_manager;
 use mod_quiz\event\group_override_created;
 use mod_quiz\event\group_override_deleted;
 use mod_quiz\event\group_override_updated;
@@ -26,6 +28,7 @@ use mod_quiz\event\user_override_created;
 use mod_quiz\event\user_override_deleted;
 use mod_quiz\event\user_override_updated;
 use mod_quiz\quiz_settings;
+use stdClass;
 
 /**
  * Manager class for quiz overrides
@@ -90,9 +93,11 @@ class override_manager {
         $errors = [];
 
         // Ensure at least one of the overrideable settings is set.
+        $accessrulerequiredkeys = access_manager::get_override_required_settings();
+        $requiredkeys = array_merge(self::OVERRIDEABLE_QUIZ_SETTINGS, $accessrulerequiredkeys);
         $keysthatareset = array_map(function ($key) use ($formdata) {
             return isset($formdata->$key) && !is_null($formdata->$key);
-        }, self::OVERRIDEABLE_QUIZ_SETTINGS);
+        }, $requiredkeys);
 
         $hasoverridevalues = in_array(true, $keysthatareset, true);
 
@@ -217,7 +222,7 @@ class override_manager {
     }
 
     /**
-     * Parses the formdata by finding only the OVERRIDEABLE_QUIZ_SETTINGS,
+     * Parses the formdata by finding the OVERRIDEABLE_QUIZ_SETTINGS and from overridable access-rule components,
      * clearing any values that match the existing quiz, and re-adds the user or group id.
      *
      * @param array $formdata data usually from moodleform or webservice call.
@@ -226,7 +231,9 @@ class override_manager {
      */
     public function parse_formdata(array $formdata): array {
         // Get the data from the form that we want to update.
-        $settings = array_intersect_key($formdata, array_flip(self::OVERRIDEABLE_QUIZ_SETTINGS));
+        $accessrulekeys = access_manager::get_override_setting_names();
+        $keys = array_merge(self::OVERRIDEABLE_QUIZ_SETTINGS, $accessrulekeys);
+        $settings = array_intersect_key($formdata, array_flip($keys));
 
         // Remove values that are the same as currently in the quiz.
         $settings = $this->clear_unused_values($settings);
@@ -273,6 +280,7 @@ class override_manager {
         } else {
             $id = $DB->insert_record('quiz_overrides', $datatoset);
         }
+        $datatoset['overrideid'] = $id;
 
         $userid = $datatoset['userid'] ?? null;
         $groupid = $datatoset['groupid'] ?? null;
@@ -304,6 +312,9 @@ class override_manager {
             // If is just a user, can update only their calendar event.
             quiz_update_events($this->quiz, (object) $datatoset);
         }
+
+        // Update access-rule override data.
+        access_manager::save_override_settings($datatoset);
 
         return $id;
     }
@@ -351,7 +362,6 @@ class override_manager {
 
         $this->delete_overrides($records, $shouldlog);
     }
-
 
     /**
      * Builds sql and parameters to find overrides in quiz with the given ids
@@ -418,6 +428,8 @@ class override_manager {
                 $this->fire_deleted_event($override->id, $userid, $groupid);
             }
         }
+
+        access_manager::delete_override_settings($this->quiz->id, $overrides);
     }
 
     /**
@@ -621,6 +633,8 @@ class override_manager {
             }
         }
 
+        $formdata = access_manager::clean_override_form_data($formdata);
+
         return $formdata;
     }
 
@@ -725,5 +739,203 @@ class override_manager {
      */
     public static function after_group_membership_removed(after_group_membership_removed $hook): void {
         quiz_overrides_cache_manager::purge_for_group_members($hook->groupinstance->id, $hook->userids);
+    }
+
+    /**
+     * Get override by ID.
+     *
+     * @param int $overrideid
+     * @return ?stdClass the override object
+     * @throws dml_exception if strictness set to MUST_EXIST and override not found
+     */
+    public static function get_override(int $overrideid, int $strictness = IGNORE_MISSING): ?stdClass {
+        global $DB;
+        [$accessselects, $accessjoins, $accessparams] = access_manager::get_override_settings_sql('o');
+        $accessrulesqlselects = !empty($accessselects) ? ", $accessselects" : '';
+        $sql = "SELECT o.* {$accessrulesqlselects}
+                FROM {quiz_overrides} o
+                {$accessjoins}
+                WHERE o.id = ?";
+        $accessparams[] = $overrideid;
+        return $DB->get_record_sql($sql, $accessparams, $strictness) ?? null;
+    }
+
+    /**
+     * Checks if the user has overrides for the quiz whether individually or in a group.
+     *
+     * TODO: PHPDOC
+     *
+     * @param int $quizid the quiz ID
+     * @return ?\stdClass
+     */
+    public static function fetch_override_by_user_quiz(int $userid, int $quizid): ?stdClass {
+        global $DB;
+
+        // No quiz, no override.
+        $quiz = $DB->get_record('quiz', ['id' => $quizid]);
+        if (!$quiz) {
+            return null;
+        }
+
+        // SQL components to include quiz_access subplugin override fields.
+        [$selects, $joins, $params] = access_manager::get_override_settings_sql('o');
+        $selects = $selects ? ", {$selects}" : '';
+
+        // Check for user override.
+        $sql = "SELECT o.*{$selects}
+                  FROM {quiz_overrides} o {$joins}
+                 WHERE o.quiz = ? AND o.userid = ?";
+        $userparams = array_merge($params, [$quizid, $userid]);
+        $useroverride = $DB->get_record_sql($sql, $userparams);
+        if ($useroverride) {
+            return $useroverride;
+        }
+
+        // Check for group overrides.
+        $groupings = groups_get_user_groups($quiz->course, $userid);
+        if (!empty($groupings[0])) {
+            [$insql, $inparams] = $DB->get_in_or_equal(array_values($groupings[0]));
+            $sql = "SELECT o.*{$selects}
+                      FROM {quiz_overrides} o
+                           {$joins}
+                     WHERE groupid {$insql} AND quiz = ?";
+            $groupparams = array_merge($params, $inparams);
+            $groupparams[] = $quizid;
+            return $DB->get_record_sql($sql, $groupparams) ?: null;
+        }
+
+        return null;
+    }
+
+    /**
+     * Get the override settings of a specific user in current quiz.
+     *
+     * @param int|stdClass $userorid if passing in an object, only the `id` property is required
+     * @return stdClass|null
+     */
+    public function get_user_override(int|stdClass $userorid): ?stdClass {
+        global $DB;
+        $userid = is_object($userorid) ? $userorid->id : $userorid;
+        [$course, $cm] = get_course_and_cm_from_cmid($this->quiz->cmid, 'quiz', $this->quiz->course);
+
+        // SQL components to include quiz_access subplugin override fields.
+        // $quizobj = new quiz_settings($this->quiz, $course, $course);
+        [$selects, $joins, $params] = access_manager::get_override_settings_sql('o');
+        $selects = $selects ? ", {$selects}" : '';
+
+        // Check for user override.
+        $sql = "SELECT o.*{$selects}
+                  FROM {quiz_overrides} o {$joins}
+                 WHERE o.quiz = ? AND o.userid = ?";
+        $userparams = array_merge($params, [$this->quiz->id, $userid]);
+        $useroverride = $DB->get_record_sql($sql, $userparams);
+        if ($useroverride) {
+            return $useroverride;
+        }
+
+        // Check for group overrides.
+        $groupings = groups_get_user_groups($this->quiz->course, $userid);
+        if (!empty($groupings[0])) {
+            [$insql, $inparams] = $DB->get_in_or_equal(array_values($groupings[0]));
+            $sql = "SELECT o.*{$selects}
+                      FROM {quiz_overrides} o
+                           {$joins}
+                     WHERE groupid {$insql} AND quiz = ?";
+            $groupparams = array_merge($params, $inparams);
+            $groupparams[] = $this->quiz->id;
+            return $DB->get_record_sql($sql, $groupparams) ?: null;
+        }
+
+        return null;
+    }
+
+    /**
+     * Get quiz overrides for groups
+     *
+     * @param ?array $groups
+     * @return array
+     */
+    public function get_group_overrides(?array $groups = null): array {
+        global $DB;
+
+        if (is_null($groups)) {
+            $groups = array_keys(groups_get_all_groups($this->quiz->course));
+        }
+
+        if (empty($groups)) {
+            return [];
+        }
+
+        [$accessselects, $accessjoins, $accessparams] = access_manager::get_override_settings_sql('o');
+        $selects = ['o.*, g.name'];
+        if ($accessselects) {
+            $selects[] = $accessselects;
+        }
+        $selects = implode(', ', $selects);
+        $params = ['quizid' => $this->quiz->id];
+        [$insql, $inparams] = $DB->get_in_or_equal($groups, SQL_PARAMS_NAMED);
+
+        $sql = "SELECT {$selects}
+                  FROM {quiz_overrides} o
+                  JOIN {groups} g ON o.groupid = g.id
+                       {$accessjoins}
+                 WHERE o.quiz = :quizid
+                       AND g.id $insql
+              ORDER BY g.name";
+
+        return $DB->get_records_sql($sql, array_merge($accessparams, $params, $inparams));
+    }
+
+    /**
+     * Provide a list of user targeted overrides for the current quiz
+     *
+     * @return array
+     */
+    public function get_user_overrides(): array {
+        global $DB;
+        $cm = get_coursemodule_from_id('quiz', $this->quiz->cmid);
+        $quizgroupmode = groups_get_activity_groupmode($cm);
+        $showallgroups = ($quizgroupmode == NOGROUPS) || has_capability('moodle/site:accessallgroups', $this->context);
+        $userfieldsapi = \core_user\fields::for_identity($this->context)->with_name()->with_userpic();
+        $extrauserfields = $userfieldsapi->get_required_fields([\core_user\fields::PURPOSE_IDENTITY]);
+        $userfieldssql = $userfieldsapi->get_sql('u', true, '', 'userid', false);
+
+        $overrides = [];
+        [$accessselects, $accessjoins, $accessparams] = access_manager::get_override_settings_sql('o');
+        [$sort, $params] = users_order_by_sql('u', null, $this->context, $extrauserfields);
+        $params['quizid'] = $this->quiz->id;
+
+        if ($showallgroups) {
+            $groupsjoin = '';
+            $groupswhere = '';
+        } else if ($groups) {
+            [$insql, $inparams] = $DB->get_in_or_equal(array_keys($groups), SQL_PARAMS_NAMED);
+            $groupsjoin = 'JOIN {groups_members} gm ON u.id = gm.userid';
+            $groupswhere = ' AND gm.groupid ' . $insql;
+            $params += $inparams;
+        } else {
+            // User cannot see any data.
+            $groupsjoin = '';
+            $groupswhere = ' AND 1 = 2';
+        }
+        $selects = ['o.*', $userfieldssql->selects];
+        if ($accessselects) {
+            $selects[] = $accessselects;
+        }
+        $selects = implode(', ', $selects);
+
+        $sql = "SELECT {$selects}
+                FROM {quiz_overrides} o
+                JOIN {user} u ON u.id = o.userid
+                    {$userfieldssql->joins}
+                    {$accessjoins}
+                    {$groupsjoin}
+                WHERE o.quiz = :quizid
+                    {$groupswhere}
+            ORDER BY $sort";
+        $params = array_merge($params, $userfieldssql->params, $accessparams);
+        $overrides = $DB->get_records_sql($sql, $params);
+
+        return $overrides;
     }
 }

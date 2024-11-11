@@ -23,7 +23,9 @@
  */
 
 use mod_quiz\form\edit_override_form;
+use mod_quiz\local\override_manager;
 use mod_quiz\quiz_settings;
+use context_module;
 
 require_once(__DIR__ . '/../../config.php');
 require_once($CFG->dirroot.'/mod/quiz/lib.php');
@@ -36,7 +38,7 @@ $reset = optional_param('reset', false, PARAM_BOOL);
 
 $override = null;
 if ($overrideid) {
-    $override = $DB->get_record('quiz_overrides', ['id' => $overrideid], '*', MUST_EXIST);
+    $override = override_manager::get_override($overrideid, MUST_EXIST);
     $quizobj = quiz_settings::create($override->quiz);
 } else {
     $quizobj = quiz_settings::create_for_cmid($cmid);

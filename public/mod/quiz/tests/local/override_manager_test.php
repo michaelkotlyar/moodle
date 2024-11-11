@@ -22,6 +22,9 @@ use mod_quiz\event\user_override_created;
 use mod_quiz\event\user_override_updated;
 use mod_quiz\event\user_override_deleted;
 use mod_quiz\quiz_settings;
+use PHPUnit\Framework\Attributes\CoversClass;
+use PHPUnit\Framework\Attributes\CoversMethod;
+use PHPUnit\Framework\Attributes\DataProvider;
 
 /**
  * Test for override_manager class
@@ -29,8 +32,9 @@ use mod_quiz\quiz_settings;
  * @package   mod_quiz
  * @copyright 2024 Matthew Hilton <matthewhilton@catalyst-au.net>
  * @license   http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
- * @covers    \mod_quiz\local\override_manager
  */
+#[CoversClass(override_manager::class)]
+#[CoversMethod(override_manager::class, 'get_user_overrides')]
 final class override_manager_test extends \advanced_testcase {
     /** @var array Default quiz settings **/
     private const TEST_QUIZ_SETTINGS = [
@@ -1121,6 +1125,207 @@ final class override_manager_test extends \advanced_testcase {
         $this->assertCount(2, $overrides);
         $this->assertArrayHasKey($useroverrideid, $overrides);
         $this->assertArrayHasKey($group2overrideid, $overrides);
+    }
+
+    /**
+     * Test getting all overrides in a quiz when using override manager.
+     */
+    #[DataProvider('user_and_group_provider')]
+    public function test_override_manager_get_all_overrides(
+        string $group,
+        string $overridetype,
+        string $overridepassword,
+    ): void {
+        $this->resetAfterTest();
+        $this->setAdminUser();
+
+        [$user, $groupid, $quizid, $manager] = $this->create_user_group_and_override_data($group, $overridetype, $overridepassword);
+
+        $overrides = $manager->get_all_overrides();
+        if (in_array($overridetype, ['user', 'group'])) {
+            $this->assertCount(1, $overrides);
+            $override = array_shift($overrides);
+            $this->assertEquals($overridepassword, $override->password);
+            if ($overridetype === 'user') {
+                $this->assertEquals($user->id, $override->userid);
+                $this->assertEmpty($override->groupid);
+            } else {
+                $this->assertEquals($groupid, $override->groupid);
+                $this->assertEmpty($override->userid);
+            }
+        } else {
+            $this->assertEmpty($overrides);
+        }
+    }
+
+    /**
+     * Test getting user overrides in a quiz when using override manager.
+     */
+    #[DataProvider('user_and_group_provider')]
+    public function test_override_manager_get_user_overrides(
+        string $group,
+        string $overridetype,
+        string $overridepassword,
+    ): void {
+        $this->resetAfterTest();
+        $this->setAdminUser();
+
+        [$user, $groupid, $quizid, $manager] = $this->create_user_group_and_override_data($group, $overridetype, $overridepassword);
+
+        $useroverrides = $manager->get_user_overrides();
+        if ($overridetype === 'user') {
+            $this->assertCount(1, $useroverrides);
+            $override = array_shift($useroverrides);
+            $this->assertEquals($overridepassword, $override->password);
+            $this->assertEquals($user->id, $override->userid);
+            $this->assertEmpty($override->groupid);
+        } else {
+            $this->assertCount(0, $useroverrides);
+        }
+    }
+
+    /**
+     * Test getting group overrides in a quiz when using override manager.
+     */
+    #[DataProvider('user_and_group_provider')]
+    public function test_override_manager_get_group_overrides(
+        string $group,
+        string $overridetype,
+        string $overridepassword,
+    ): void {
+        $this->resetAfterTest();
+        $this->setAdminUser();
+
+        [$user, $groupid, $quizid, $manager] = $this->create_user_group_and_override_data($group, $overridetype, $overridepassword);
+
+        $groupoverrides = $manager->get_group_overrides();
+        if ($overridetype === 'group') {
+            $this->assertCount(1, $groupoverrides);
+            $override = array_shift($groupoverrides);
+            $this->assertEquals($overridepassword, $override->password);
+            $this->assertEquals($groupid, $override->groupid);
+            $this->assertEmpty($override->userid);
+        } else {
+            $this->assertCount(0, $groupoverrides);
+        }
+    }
+
+    /**
+     * Test if values are overridden when fetching quiz settings for user.
+     */
+    #[DataProvider('user_and_group_provider')]
+    public function test_quiz_settings(
+        string $group,
+        string $overridetype,
+        string $overridepassword,
+    ): void {
+        $this->resetAfterTest();
+        $this->setAdminUser();
+
+        [$user, $groupid, $quizid, $manager] = $this->create_user_group_and_override_data($group, $overridetype, $overridepassword);
+
+        $quizsettings = quiz_settings::create($quizid, $user->id)->get_quiz();
+        if (in_array($overridetype, ['user', 'group'])) {
+            $this->assertEquals($overridepassword, $quizsettings->password);
+        } else {
+            $this->assertEmpty($quizsettings->password);
+        }
+    }
+
+    /**
+     * Manages creating a user and applying an override.
+     *
+     * Creates the user, enrols them to the course. If applicable, will create a group and add
+     * them to the group. And if override config settings present, will override the quiz settings
+     * for the user/group. Returns an array of variables relevant for testing.
+     *
+     * @param string $group if empty, do not create group nor add user
+     * @param string $overridepassword if empty, don't override password
+     * @param string $overridetype should be either 'user' or 'group', otherwise does not apply override
+     * @return array [$user, $groupid, $quizid, $overridemanager]
+     */
+    protected function create_user_group_and_override_data(
+        string $group,
+        string $overridetype,
+        string $overridepassword,
+    ): array {
+        // Create course and quiz.
+        [$quizobj, $course] = $this->create_quiz_and_course();
+        $quizid = $quizobj->get_quiz()->id;
+        $overridemanager = $quizobj->get_override_manager();
+
+        // Create user and enrol to course.
+        $user = $this->getDataGenerator()->create_user();
+        $this->getDataGenerator()->enrol_user($user->id, $course->id);
+
+        // Add to group, if applicable.
+        $groupid = 0;
+        if ($group) {
+            $group = groups_get_group_by_idnumber($course->id, $group);
+            if (!$group) {
+                $groupid = groups_create_group((object) [
+                    'courseid' => $course->id,
+                    'name' => 'group' . $group,
+                    'idnumber' => $group,
+                ]);
+            } else {
+                $groupid = $group->id;
+            }
+            groups_add_member($groupid, $user->id);
+        }
+
+        // Apply password override, if applicable.
+        if (!empty($overridepassword) && in_array($overridetype, ['user', 'group'])) {
+            $overridetypevalue = $overridetype === 'user' ? $user->id : $groupid;
+            $overridetype .= 'id';
+
+            $overridemanager->save_override([
+                'quiz' => $quizid,
+                'password' => $overridepassword,
+                $overridetype => $overridetypevalue,
+            ]);
+        }
+
+        return [$user, $groupid, $quizid, $overridemanager];
+    }
+
+    /**
+     * Provides users, what group they belong to and override password.
+     *
+     *
+     * @return \Generator
+     */
+    public static function user_and_group_provider(): \Generator {
+        yield 'Override user' => [
+            'group' => '',
+            'overridetype' => 'user',
+            'overridepassword' => 'testpass1',
+        ];
+        yield 'Override user 2' => [
+            'group' => '',
+            'overridetype' => 'user',
+            'overridepassword' => 'testpass2',
+        ];
+        yield 'Override group user 1' => [
+            'group' => 'group1',
+            'overridetype' => 'group',
+            'overridepassword' => 'grouppass1',
+        ];
+        yield 'Override group user 2' => [
+            'group' => 'group2',
+            'overridetype' => 'group',
+            'overridepassword' => 'grouppass2',
+        ];
+        yield 'Override group user 3' => [
+            'group' => 'group2',
+            'overridetype' => 'user',
+            'overridepassword' => 'grouppass2',
+        ];
+        yield 'No override user' => [
+            'group' => '',
+            'overridetype' => '',
+            'overridepassword' => '',
+        ];
     }
 
     /**

@@ -22,7 +22,9 @@ use context_module;
 use mod_quiz_mod_form;
 use moodle_url;
 use moodleform;
+use MoodleQuickForm;
 use stdClass;
+use mod_quiz\access_manager;
 
 defined('MOODLE_INTERNAL') || die();
 
@@ -59,6 +61,9 @@ class edit_override_form extends moodleform {
     /** @var int overrideid, if provided. */
     protected int $overrideid;
 
+    /** @var ?stdClass override, if provided. */
+    protected ?stdClass $override;
+
     /**
      * Constructor.
      *
@@ -80,10 +85,48 @@ class edit_override_form extends moodleform {
         $this->groupid = empty($override->groupid) ? 0 : $override->groupid;
         $this->userid = empty($override->userid) ? 0 : $override->userid;
         $this->overrideid = $override->id ?? 0;
+        $this->override = $override;
 
         parent::__construct($submiturl);
     }
 
+    /**
+     * Get the quiz object.
+     *
+     * @return stdClass
+     */
+    public function get_quiz(): stdClass {
+        return $this->quiz;
+    }
+
+    /**
+     * Get the context.
+     *
+     * @return context_module
+     */
+    public function get_context(): context_module {
+        return $this->context;
+    }
+
+    /**
+     * Get the form fields.
+     *
+     * @return MoodleQuickForm
+     */
+    public function get_mform(): MoodleQuickForm {
+        return $this->_form;
+    }
+
+    /**
+     * Get the override data.
+     *
+     * @return ?stdClass
+     */
+    public function get_override(): ?stdClass {
+        return $this->override;
+    }
+
+    #[\Override]
     protected function definition() {
         global $DB;
 
@@ -224,6 +267,11 @@ class edit_override_form extends moodleform {
         $mform->addHelpButton('attempts', 'attempts', 'quiz');
         $mform->setDefault('attempts', $this->quiz->attempts);
 
+        // Access-rule fields.
+        if (access_manager::add_override_form_fields($this)) {
+            $mform->closeHeaderBefore('reason_editor');
+        }
+
         // Reason for override.
         $editoroptions = [
             'maxfiles' => 0,
@@ -298,6 +346,9 @@ class edit_override_form extends moodleform {
                 $errors['userid'] = $errors['userid'] ?? "" . $errors['general'];
             }
         }
+
+        // Apply access-rule validation.
+        $errors = access_manager::validate_override_form_fields($errors, $data, $files, $this);
 
         return $errors;
     }

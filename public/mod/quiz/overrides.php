@@ -22,6 +22,7 @@
  * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
 
+use mod_quiz\access_manager;
 use mod_quiz\quiz_settings;
 
 require_once(__DIR__ . '/../../config.php');
@@ -91,27 +92,12 @@ if (!empty($orphaned)) {
 $overrides = [];
 $colclasses = [];
 $headers = [];
+$overridemanager = $quizobj->get_override_manager();
 
-// Fetch all overrides.
 if ($groupmode) {
     $headers[] = get_string('group');
-    // To filter the result by the list of groups that the current user has access to.
-    if ($groups) {
-        $params = ['quizid' => $quiz->id];
-        list($insql, $inparams) = $DB->get_in_or_equal(array_keys($groups), SQL_PARAMS_NAMED);
-        $params += $inparams;
-
-        $sql = "SELECT o.*, g.name
-                  FROM {quiz_overrides} o
-                  JOIN {groups} g ON o.groupid = g.id
-                 WHERE o.quiz = :quizid AND g.id $insql
-              ORDER BY g.name";
-
-        $overrides = $DB->get_records_sql($sql, $params);
-    }
-
+    $overrides = $overridemanager->get_group_overrides(array_keys($groups));
 } else {
-    // User overrides.
     $colclasses[] = 'colname';
     $headers[] = get_string('user');
     $userfieldsapi = \core_user\fields::for_identity($context)->with_name()->with_userpic();
@@ -121,36 +107,7 @@ if ($groupmode) {
         $colclasses[] = 'col' . $field;
         $headers[] = \core_user\fields::get_display_name($field);
     }
-
-    list($sort, $params) = users_order_by_sql('u', null, $context, $extrauserfields);
-    $params['quizid'] = $quiz->id;
-
-    if ($showallgroups) {
-        $groupsjoin = '';
-        $groupswhere = '';
-
-    } else if ($groups) {
-        list($insql, $inparams) = $DB->get_in_or_equal(array_keys($groups), SQL_PARAMS_NAMED);
-        $groupsjoin = 'JOIN {groups_members} gm ON u.id = gm.userid';
-        $groupswhere = ' AND gm.groupid ' . $insql;
-        $params += $inparams;
-
-    } else {
-        // User cannot see any data.
-        $groupsjoin = '';
-        $groupswhere = ' AND 1 = 2';
-    }
-
-    $overrides = $DB->get_records_sql("
-            SELECT o.*, {$userfieldssql->selects}
-              FROM {quiz_overrides} o
-              JOIN {user} u ON o.userid = u.id
-                  {$userfieldssql->joins}
-              $groupsjoin
-             WHERE o.quiz = :quizid
-               $groupswhere
-             ORDER BY $sort
-            ", array_merge($params, $userfieldssql->params));
+    $overrides = $overridemanager->get_user_overrides();
 }
 
 // Initialise table.
@@ -228,6 +185,9 @@ foreach ($overrides as $override) {
         $values[] = $override->password !== '' ?
                 get_string('enabled', 'quiz') : get_string('none', 'quiz');
     }
+
+    // Access rule override table field.
+    [$fields, $values] = access_manager::add_override_table_fields($override, $fields, $values, $context);
 
     // Format reason.
     if (isset($override->reason) && $override->reason !== '') {
