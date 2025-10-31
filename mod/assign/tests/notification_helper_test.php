@@ -23,6 +23,12 @@ use mod_assign\task\send_assignment_due_digest_notification_to_user;
 use mod_assign\task\send_assignment_due_soon_notification_to_user;
 use mod_assign\task\send_assignment_overdue_notification_to_user;
 
+defined('MOODLE_INTERNAL') || die();
+
+global $CFG;
+
+require_once($CFG->dirroot . '/mod/assign/locallib.php');
+
 /**
  * Test class for the assignment notification_helper.
  *
@@ -1235,5 +1241,54 @@ File submissions
 
         // Clear sink.
         $sink->clear();
+    }
+
+    /**
+     * Test allownotify configuration settings.
+     */
+    public function test_control_send_notification_with_allownotify_config(): void {
+        $this->resetAfterTest();
+
+        $generator = $this->getDataGenerator();
+
+        $course = $generator->create_course();
+
+        /** @var \mod_assign_generator $assignmentgenerator */
+        $assignmentgenerator = $generator->get_plugin_generator('mod_assign');
+        $assignobj = $assignmentgenerator->create_instance([
+            'course' => $course,
+            'name' => 'Assign 1',
+            'attemptreopenmethod' => ASSIGN_ATTEMPT_REOPEN_METHOD_MANUAL,
+            'maxattempts' => 2,
+            'assignsubmission_onlinetext_enabled' => true,
+            'assignfeedback_comments_enabled' => true,
+            'sendstudentnotifications' => true,
+        ]);
+        $context = \context_module::instance($assignobj->cmid);
+        $assign = new \assign($context, null, null);
+
+        $assignobj2 = $assignmentgenerator->create_instance([
+            'course' => $course,
+            'name' => 'Assign 2',
+            'attemptreopenmethod' => ASSIGN_ATTEMPT_REOPEN_METHOD_MANUAL,
+            'maxattempts' => 2,
+            'assignsubmission_onlinetext_enabled' => true,
+            'assignfeedback_comments_enabled' => true,
+            'sendstudentnotifications' => false,
+        ]);
+        $context2 = \context_module::instance($assignobj2->cmid);
+        $assign2 = new \assign($context2, null, null);
+
+        $this->assertTrue($assign->get_instance()->sendstudentnotifications);
+        $this->assertFalse($assign2->get_instance()->sendstudentnotifications);
+
+        set_config('allownotifycontrol', 0, 'assign');
+        set_config('sendstudentnotifications', 0, 'assign');
+        $this->assertFalse($assign->get_instance()->sendstudentnotifications);
+        $this->assertFalse($assign2->get_instance()->sendstudentnotifications);
+
+        set_config('sendstudentnotifications', 1, 'assign');
+        $this->assertTrue($assign->get_instance()->sendstudentnotifications);
+        $this->assertTrue($assign2->get_instance()->sendstudentnotifications);
     }
 }
