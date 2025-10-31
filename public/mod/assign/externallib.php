@@ -351,7 +351,6 @@ class mod_assign_external extends \mod_assign\external\external_api {
                      'm.submissiondrafts, ' .
                      'm.sendnotifications, '.
                      'm.sendlatenotifications, ' .
-                     'm.sendstudentnotifications, ' .
                      'm.duedate, ' .
                      'm.allowsubmissionsfromdate, '.
                      'm.grade, ' .
@@ -444,7 +443,7 @@ class mod_assign_external extends \mod_assign\external\external_api {
                     $assignment['submissiondrafts'] = $module->submissiondrafts;
                     $assignment['sendnotifications'] = $module->sendnotifications;
                     $assignment['sendlatenotifications'] = $module->sendlatenotifications;
-                    $assignment['sendstudentnotifications'] = $module->sendstudentnotifications;
+                    $assignment['sendstudentnotifications'] = $assign->get_sendstudentnotifications();
                     $assignment['duedate'] = $assign->get_instance()->duedate;
                     $assignment['allowsubmissionsfromdate'] = $assign->get_instance()->allowsubmissionsfromdate;
                     $assignment['grade'] = $module->grade;
@@ -1663,6 +1662,12 @@ class mod_assign_external extends \mod_assign\external\external_api {
         $validateddata = $mform->get_data();
         $assignment->set_is_marking($marker);
         if ($validateddata) {
+            // If global settings do not allow teachers to choose whether or not to notify students of grades/feedback, we override
+            // "sendstudentnotifications" with the global setting.
+            $allownotifycontrol = (bool) get_config('assign', 'allownotifycontrol');
+            if (!$allownotifycontrol) {
+                $validateddata->sendstudentnotifications = (int) $assignment->get_sendstudentnotifications();
+            }
             $assignment->save_grade($params['userid'], $validateddata);
         } else {
             $warnings[] = self::generate_warning($params['assignmentid'],
