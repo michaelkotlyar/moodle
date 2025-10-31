@@ -87,9 +87,11 @@ class grading_app implements templatable, renderable {
     public function export_for_template(renderer_base $output) {
         global $CFG, $USER;
 
+        $assigninstance = $this->assignment->get_instance();
+
         $export = new stdClass();
         $export->userid = $this->userid;
-        $export->assignmentid = $this->assignment->get_instance()->id;
+        $export->assignmentid = $assigninstance->id;
         $export->cmid = $this->assignment->get_course_module()->id;
         $export->contextid = $this->assignment->get_context()->id;
         $export->groupid = $this->groupid;
@@ -101,6 +103,8 @@ class grading_app implements templatable, renderable {
         $export->hasmarkingworkflow = count($export->markingworkflowfilters) > 0;
         $export->markingallocationfilters = $this->assignment->get_marking_allocation_filters(true);
         $export->hasmarkingallocation = count($export->markingallocationfilters) > 0;
+        $export->ismarking = (int)$this->marker;
+        $export->allownotifycontrol = (bool) get_config('assign', 'allownotifycontrol');
 
         $num = 1;
         foreach ($this->participants as $idx => $record) {
@@ -141,8 +145,8 @@ class grading_app implements templatable, renderable {
         $export->count = count($export->participants);
         $export->coursename = $this->assignment->get_course_context()->get_context_name(true, false, false);
         $export->caneditsettings = has_capability('mod/assign:addinstance', $this->assignment->get_context());
-        $export->duedate = $this->assignment->get_instance()->duedate;
-        $export->duedatestr = userdate($this->assignment->get_instance()->duedate);
+        $export->duedate = $assigninstance->duedate;
+        $export->duedatestr = userdate($assigninstance->duedate);
 
         // Time remaining.
         $due = '';
@@ -154,7 +158,7 @@ class grading_app implements templatable, renderable {
         $export->timeremainingstr = $due;
 
         if ($export->duedate < $time) {
-            $export->cutoffdate = $this->assignment->get_instance()->cutoffdate;
+            $export->cutoffdate = $assigninstance->cutoffdate;
             $cutoffdate = $export->cutoffdate;
             if ($cutoffdate) {
                 if ($cutoffdate > $time) {
@@ -166,7 +170,7 @@ class grading_app implements templatable, renderable {
             }
         }
 
-        $export->defaultsendnotifications = $this->assignment->get_instance()->sendstudentnotifications;
+        $export->defaultsendnotifications = $assigninstance->sendstudentnotifications;
         $export->rarrow = $output->rarrow();
         $export->larrow = $output->larrow();
         // List of identity fields to display (the user info will not contain any fields the user cannot view anyway).
