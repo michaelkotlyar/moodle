@@ -40,11 +40,13 @@
 <div class="col-auto">
     {{#hassubmit}}
         <div class="d-flex align-items-center" data-region="quick-grading-save">
-            <div class="me-4">
-                <input type="hidden" name="sendstudentnotifications" value="0" {{#sendstudentnotifications}}disabled{{/sendstudentnotifications}}>
-                <input type="checkbox" id="send-student-notifications-{{uniqid}}" name="sendstudentnotifications" {{#sendstudentnotifications}}checked="checked"{{/sendstudentnotifications}}>
-                <label for="send-student-notifications-{{uniqid}}" class="m-0">{{#str}} notifystudents, mod_assign {{/str}}</label>
-            </div>
+            {{#allownotifycontrol}}
+                <div class="me-4">
+                    <input type="hidden" name="sendstudentnotifications" value="0" {{#sendstudentnotifications}}disabled{{/sendstudentnotifications}}>
+                    <input type="checkbox" id="send-student-notifications-{{uniqid}}" name="sendstudentnotifications" {{#sendstudentnotifications}}checked="checked"{{/sendstudentnotifications}}>
+                    <label for="send-student-notifications-{{uniqid}}" class="m-0">{{#str}} notifystudents, mod_assign {{/str}}</label>
+                </div>
+            {{/allownotifycontrol}}
             <button type="submit" class="btn btn-primary">
                 {{#str}}save{{/str}}
             </button>
