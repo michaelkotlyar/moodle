@@ -28,17 +28,28 @@
     Context variables required for this template:
     * see mod/assign/classes/output/grading_app.php
 
+    Example context (json):
+    {
+        "allownotifycontrol": true,
+        "defaultsendnotifications": true,
+        "helpicon": "<i class='icon fa fa-circle-question text-info' ...></i>",
+        "showreview": true
+    }
+}}
+{{!
     This template is initially hidden, and is only displayed after the current user info has been loaded.
 }}
 <div class="d-flex justify-content-between">
     <form data-region="grading-actions-form" class="hide flex-grow-1 align-self-center">
-        <label>{{#str}}sendstudentnotifications, mod_assign{{/str}}
-               <input type="checkbox" name="sendstudentnotifications" class="form-check-input"
-                      {{#defaultsendnotifications}}checked="checked"{{/defaultsendnotifications}} />
-        </label>
-        {{#helpicon}}
-            {{>core/help_icon}}
-        {{/helpicon}}
+        {{#allownotifycontrol}}
+            <label>{{#str}}sendstudentnotifications, mod_assign{{/str}}
+                <input type="checkbox" name="sendstudentnotifications"
+                        {{#defaultsendnotifications}}checked="checked"{{/defaultsendnotifications}} />
+            </label>
+            {{#helpicon}}
+                {{>core/help_icon}}
+            {{/helpicon}}
+        {{/allownotifycontrol}}
         <button type="submit" class="btn btn-primary" name="savechanges">{{#str}}savechanges{{/str}}</button>
         <button type="submit" class="btn btn-primary" name="saveandshownext">{{#str}}saveandnext{{/str}}</button>
         <button type="submit" class="btn btn-secondary" name="resetbutton">{{#str}}reset{{/str}}</button>

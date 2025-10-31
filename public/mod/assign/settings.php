@@ -425,6 +425,14 @@ if ($ADMIN->fulltree) {
     $setting->set_advanced_flag_options(admin_setting_flag::ENABLED, false);
     $setting->set_locked_flag_options(admin_setting_flag::ENABLED, false);
     $settings->add($setting);
+
+    $setting = new admin_setting_configcheckbox(
+        'assign/allownotifycontrol',
+        get_string('allownotifycontrol', 'mod_assign'),
+        get_string('allownotifycontrol_help', 'mod_assign'),
+        1,
+    );
+    $settings->add($setting);
 }
 
 $ADMIN->add('modassignfolder', $settings);
