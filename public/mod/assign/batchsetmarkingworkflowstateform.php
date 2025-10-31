@@ -75,10 +75,14 @@ class mod_assign_batch_set_marking_workflow_state_form extends moodleform {
 
         $mform->addElement('select', 'markingworkflowstate', get_string('markingworkflowstate', 'assign'), $states);
 
-        // Don't allow notification to be sent until in "Released" state.
-        $mform->addElement('selectyesno', 'sendstudentnotifications', get_string('sendstudentnotifications', 'assign'));
-        $mform->setDefault('sendstudentnotifications', 0);
-        $mform->disabledIf('sendstudentnotifications', 'markingworkflowstate', 'neq', ASSIGN_MARKING_WORKFLOW_STATE_RELEASED);
+        // Are we allowing the control of notifications?
+        $allownotificationchoice = (bool) get_config('assign', 'allownotifycontrol');
+        if ($allownotificationchoice) {
+            // Don't allow notification to be sent until in "Released" state.
+            $mform->addElement('selectyesno', 'sendstudentnotifications', get_string('sendstudentnotifications', 'assign'));
+            $mform->setDefault('sendstudentnotifications', 0);
+            $mform->disabledIf('sendstudentnotifications', 'markingworkflowstate', 'neq', ASSIGN_MARKING_WORKFLOW_STATE_RELEASED);
+        }
 
         $mform->addElement('hidden', 'id');
         $mform->setType('id', PARAM_INT);

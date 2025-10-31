@@ -339,7 +339,6 @@ class mod_assign_external extends \mod_assign\external\external_api {
                      'm.submissiondrafts, ' .
                      'm.sendnotifications, '.
                      'm.sendlatenotifications, ' .
-                     'm.sendstudentnotifications, ' .
                      'm.duedate, ' .
                      'm.allowsubmissionsfromdate, '.
                      'm.grade, ' .
@@ -413,6 +412,8 @@ class mod_assign_external extends \mod_assign\external\external_api {
                         }
                     }
 
+                    $assigninstance = $assign->get_instance();
+
                     $assignment = array(
                         'id' => $module->assignmentid,
                         'cmid' => $module->id,
@@ -422,15 +423,15 @@ class mod_assign_external extends \mod_assign\external\external_api {
                         'submissiondrafts' => $module->submissiondrafts,
                         'sendnotifications' => $module->sendnotifications,
                         'sendlatenotifications' => $module->sendlatenotifications,
-                        'sendstudentnotifications' => $module->sendstudentnotifications,
-                        'duedate' => $assign->get_instance()->duedate,
-                        'allowsubmissionsfromdate' => $assign->get_instance()->allowsubmissionsfromdate,
+                        'sendstudentnotifications' => $assigninstance->sendstudentnotifications,
+                        'duedate' => $assigninstance->duedate,
+                        'allowsubmissionsfromdate' => $assigninstance->allowsubmissionsfromdate,
                         'grade' => $module->grade,
                         'gradepenalty' => $module->gradepenalty,
                         'timemodified' => $module->timemodified,
                         'completionsubmit' => $module->completionsubmit,
-                        'cutoffdate' => $assign->get_instance()->cutoffdate,
-                        'gradingduedate' => $assign->get_instance()->gradingduedate,
+                        'cutoffdate' => $assigninstance->cutoffdate,
+                        'gradingduedate' => $assigninstance->gradingduedate,
                         'teamsubmission' => $module->teamsubmission,
                         'requireallteammemberssubmit' => $module->requireallteammemberssubmit,
                         'teamsubmissiongroupingid' => $module->teamsubmissiongroupingid,
@@ -1610,14 +1611,20 @@ class mod_assign_external extends \mod_assign\external\external_api {
         // Data is injected into the form by the last param for the constructor.
         $mform = new mod_assign_grade_form(null, $formparams, 'post', '', null, true, $data);
         $validateddata = $mform->get_data();
+
         if ($validateddata) {
+            // If global settings do not allow teachers to choose whether or not to notify students of grades/feedback, we override
+            // "sendstudentnotifications" with the global setting.
+            $allownotifycontrol = (bool) get_config('assign', 'allownotifycontrol');
+            if (!$allownotifycontrol) {
+                $validateddata->sendstudentnotifications = (int) $assignment->get_sendstudentnotifications();
+            }
             $assignment->save_grade($params['userid'], $validateddata);
         } else {
             $warnings[] = self::generate_warning($params['assignmentid'],
                                                  'couldnotsavegrade',
                                                  'Form validation failed.');
         }
-
 
         return $warnings;
     }
