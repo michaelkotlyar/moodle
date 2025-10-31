@@ -792,7 +792,7 @@ class assign {
         $update->sendnotifications = $formdata->sendnotifications;
         $update->sendlatenotifications = $formdata->sendlatenotifications;
         $update->sendstudentnotifications = $adminconfig->sendstudentnotifications;
-        if (isset($formdata->sendstudentnotifications)) {
+        if (isset($formdata->sendstudentnotifications) && (bool) $adminconfig->allownotifycontrol) {
             $update->sendstudentnotifications = $formdata->sendstudentnotifications;
         }
         $update->duedate = $formdata->duedate;
@@ -1572,7 +1572,7 @@ class assign {
         $update->sendnotifications = $formdata->sendnotifications;
         $update->sendlatenotifications = $formdata->sendlatenotifications;
         $update->sendstudentnotifications = $adminconfig->sendstudentnotifications;
-        if (isset($formdata->sendstudentnotifications)) {
+        if (isset($formdata->sendstudentnotifications) && (bool) $adminconfig->allownotifycontrol) {
             $update->sendstudentnotifications = $formdata->sendstudentnotifications;
         }
         $update->duedate = $formdata->duedate;
@@ -1893,14 +1893,15 @@ class assign {
         $userid = $userid ?? $USER->id;
 
         $this->instance = $this->get_default_instance();
+        $this->instance->sendstudentnotifications = $this->get_sendstudentnotifications();
 
-        // If we have the user instance already, just return it.
-        if (isset($this->userinstances[$userid])) {
-            return $this->userinstances[$userid];
+        if (!isset($this->userinstances[$userid])) {
+            $instance = $this->calculate_properties($this->instance, $userid);
+            $this->userinstances[$userid] = $instance;
+        } else {
+            $this->userinstances[$userid]->sendstudentnotifications = $this->instance->sendstudentnotifications;
         }
 
-        // Calculate properties which vary per user.
-        $this->userinstances[$userid] = $this->calculate_properties($this->instance, $userid);
         return $this->userinstances[$userid];
     }
 
@@ -1923,6 +1924,9 @@ class assign {
                 $record = (object) array_merge((array) $record, (array) $userprops);
             }
         }
+
+        $record->sendstudentnotifications = $this->get_sendstudentnotifications();
+
         return $record;
     }
 
@@ -4880,7 +4884,8 @@ class assign {
             'perpage' => $gradingtable->get_paging_selector(),
             'pagingbar' => $gradingtable->get_paging_bar(),
             'hassubmit' => $usequickgrading,
-            'sendstudentnotifications' => $this->get_instance()->sendstudentnotifications,
+            'allownotifycontrol' => (bool) get_config('assign', 'allownotifycontrol'),
+            'sendstudentnotifications' => $this->get_sendstudentnotifications(),
         ];
         $footer = new core\output\sticky_footer($OUTPUT->render_from_template('mod_assign/grading_sticky_footer', $footerdata));
 
@@ -7750,8 +7755,17 @@ class assign {
                 }
             }
 
-            // Allow teachers to skip sending notifications.
-            if (optional_param('sendstudentnotifications', true, PARAM_BOOL)) {
+            // Are we sending notification emails?
+            $sendnotifications = optional_param('sendstudentnotifications', true, PARAM_BOOL);
+            $allownotificationchoice = (bool) get_config('assign', 'allownotifycontrol');
+
+            // If the global setting to show the notification checkbox is disabled, BUT the global or instance setting
+            // to still send the notifications is enabled - that means we don't give the teacher a choice. They're sent.
+            if (!$allownotificationchoice) {
+                $sendnotifications = (int) $this->get_sendstudentnotifications();
+            }
+
+            if ($sendnotifications) {
                 $this->notify_grade_modified($grade, true);
             }
 
@@ -8999,9 +9013,17 @@ class assign {
                 // is "Released".
                 $modinfo = get_fast_modinfo($this->course, $userid);
                 $cm = $modinfo->get_cm($this->get_course_module()->id);
+
+                // If the global setting to show the notification checkbox is disabled, BUT the global or instance setting
+                // to still send the notifications is enabled - that means we don't give the teacher a choice. They're sent.
+                $allownotificationchoice = (bool) get_config('assign', 'allownotifycontrol');
+                if (!$allownotificationchoice) {
+                    $formdata->sendstudentnotifications = (int) $this->get_sendstudentnotifications();
+                }
+
                 if (
-                    $formdata->sendstudentnotifications && $cm->uservisible &&
-                    $state === ASSIGN_MARKING_WORKFLOW_STATE_RELEASED
+                    $formdata->sendstudentnotifications && $cm->uservisible
+                    && $state === ASSIGN_MARKING_WORKFLOW_STATE_RELEASED
                 ) {
                     $flags->mailed = 0;
                 }
@@ -10491,6 +10513,21 @@ class assign {
         }
 
         return $submissionstatement;
+    }
+
+    /**
+     * Retrieve sendstudentnotifications setting.
+     *
+     * If the global "allownotifycontrol" setting is enabled, return the activity's "sendstudentnotifications" value. Otherwise,
+     * return the global "sendstudentnotifications" setting.
+     *
+     * @return bool
+     */
+    public function get_sendstudentnotifications(): bool {
+        $config = get_config('assign');
+        return (bool) ($config->allownotifycontrol
+            ? $this->instance->sendstudentnotifications
+            : $config->sendstudentnotifications);
     }
 
     /**
