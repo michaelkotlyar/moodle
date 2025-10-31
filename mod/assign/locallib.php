@@ -761,7 +761,7 @@ class assign {
         $update->sendnotifications = $formdata->sendnotifications;
         $update->sendlatenotifications = $formdata->sendlatenotifications;
         $update->sendstudentnotifications = $adminconfig->sendstudentnotifications;
-        if (isset($formdata->sendstudentnotifications)) {
+        if (isset($formdata->sendstudentnotifications) && (bool) $adminconfig->allownotifycontrol) {
             $update->sendstudentnotifications = $formdata->sendstudentnotifications;
         }
         $update->duedate = $formdata->duedate;
@@ -1555,7 +1555,7 @@ class assign {
         $update->sendnotifications = $formdata->sendnotifications;
         $update->sendlatenotifications = $formdata->sendlatenotifications;
         $update->sendstudentnotifications = $adminconfig->sendstudentnotifications;
-        if (isset($formdata->sendstudentnotifications)) {
+        if (isset($formdata->sendstudentnotifications) && (bool) $adminconfig->allownotifycontrol) {
             $update->sendstudentnotifications = $formdata->sendstudentnotifications;
         }
         $update->duedate = $formdata->duedate;
@@ -1858,14 +1858,15 @@ class assign {
         $userid = $userid ?? $USER->id;
 
         $this->instance = $this->get_default_instance();
+        $this->instance->sendstudentnotifications = $this->get_sendstudentnotifications();
 
-        // If we have the user instance already, just return it.
-        if (isset($this->userinstances[$userid])) {
-            return $this->userinstances[$userid];
+        if (!isset($this->userinstances[$userid])) {
+            $instance = $this->calculate_properties($this->instance, $userid);
+            $this->userinstances[$userid] = $instance;
+        } else {
+            $this->userinstances[$userid]->sendstudentnotifications = $this->instance->sendstudentnotifications;
         }
 
-        // Calculate properties which vary per user.
-        $this->userinstances[$userid] = $this->calculate_properties($this->instance, $userid);
         return $this->userinstances[$userid];
     }
 
@@ -1888,6 +1889,9 @@ class assign {
                 $record = (object) array_merge((array) $record, (array) $userprops);
             }
         }
+
+        $record->sendstudentnotifications = $this->get_sendstudentnotifications();
+
         return $record;
     }
 
@@ -4587,8 +4591,8 @@ class assign {
         $footerdata = [
             'perpage' => $gradingtable->get_paging_selector(),
             'pagingbar' => $gradingtable->get_paging_bar(),
-            'hassubmit' => $usequickgrading,
-            'sendstudentnotifications' => $this->get_instance()->sendstudentnotifications,
+            'hassubmit' => $usequickgrading && (bool) get_config('assign', 'allownotifycontrol'),
+            'sendstudentnotifications' => $this->get_sendstudentnotifications(),
         ];
         $footer = new core\output\sticky_footer($OUTPUT->render_from_template('mod_assign/grading_sticky_footer', $footerdata));
 
@@ -7375,7 +7379,10 @@ class assign {
             $this->update_grade($grade);
 
             // Allow teachers to skip sending notifications.
-            if (optional_param('sendstudentnotifications', true, PARAM_BOOL)) {
+            if (
+                optional_param('sendstudentnotifications', true, PARAM_BOOL) &&
+                (bool) get_config('assign', 'allownotifycontrol')
+            ) {
                 $this->notify_grade_modified($grade, true);
             }
 
@@ -9829,6 +9836,20 @@ class assign {
         }
 
         return $submissionstatement;
+    }
+
+    /**
+     * Retrieve sendstudentnotifications setting.
+     *
+     * Globally, if allownotifycontrol setting is disabled, retrieve the global sendstudentnotifications setting.
+     *
+     * @return bool
+     */
+    protected function get_sendstudentnotifications(): bool {
+        $config = get_config('assign');
+        return (bool) ($config->allownotifycontrol
+            ? $this->instance->sendstudentnotifications
+            : $config->sendstudentnotifications);
     }
 
     /**
