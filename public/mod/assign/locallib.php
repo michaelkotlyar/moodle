@@ -10521,6 +10521,20 @@ class assign {
     }
 
     /**
+     * Check if user is a marker.
+     *
+     * @param int $userid
+     * @return bool
+     */
+    public function is_user_marker() {
+        global $DB, $USER;
+        return $DB->record_exists(
+            'assign_allocated_marker',
+            ['assignment' => $this->get_instance()->id, 'marker' => $USER->id],
+        );
+    }
+
+    /**
      * Get the markers allocated to the specified student on this assignment.
      * @param int $studentid
      * @return array

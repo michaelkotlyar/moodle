@@ -188,7 +188,7 @@ class grading_actionmenu implements templatable, renderable {
             $data['graderurl'] = $url->out(false);
         }
 
-        if ($this->assign->is_using_multiple_marking()) {
+        if ($this->assign->is_user_marker()) {
             $url = new moodle_url('/mod/assign/view.php', [
                 'id' => $this->assign->get_course_module()->id,
                 'action' => 'marker',
