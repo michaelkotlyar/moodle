@@ -51,6 +51,7 @@ $string['maxfiles'] = 'Maximum number of uploaded files';
 $string['maximumsize'] = 'Maximum file size';
 $string['moreusers'] = '{$a} more...';
 $string['nochanges'] = 'No changes';
+$string['overallfiles'] = 'Overall feedback files';
 $string['pluginname'] = 'File feedback';
 $string['uploadfiles'] = 'Send feedback files';
 $string['uploadzip'] = 'Upload feedback files in a zip';

@@ -334,6 +334,8 @@ class assign_feedback_file extends assign_feedback_plugin {
      * @return string
      */
     public function view_summary(stdClass $grade, &$showviewlink, bool $fromgradingtable = false, ?int $markid = null) {
+        global $OUTPUT;
+
         if ($fromgradingtable) {
             [$filearea, $fileitemid] = $this->get_fileitem_area_id($grade, $markid);
             $count = $this->count_files($grade->id, $filearea);
@@ -354,7 +356,11 @@ class assign_feedback_file extends assign_feedback_plugin {
 
         $filefeedbackitems = $this->get_all_file_feedback($grade->id);
         $o = '';
+        $data = ['filefeedback' => []];
         foreach ($filefeedbackitems as $filefeedbackitem) {
+            $feedback = [];
+            $feedback['context'] = $overall = is_null($filefeedbackitem->mark) ? get_string('overallfiles', 'assignfeedback_file') : get_string('markerfile', 'assignfeedback_file');
+
             [$filearea, $fileitemid] = $this->get_fileitem_area_id($grade, $filefeedbackitem->mark);
             $count = $this->count_files($grade->id, $filearea);
 
@@ -362,16 +368,23 @@ class assign_feedback_file extends assign_feedback_plugin {
             $showviewlink = $count > ASSIGNFEEDBACK_FILE_MAXSUMMARYFILES;
 
             if ($count <= ASSIGNFEEDBACK_FILE_MAXSUMMARYFILES) {
-                $o .= $this->assignment->render_area_files(
+                $feedback['html'] = $this->assignment->render_area_files(
                     'assignfeedback_file',
                     $filearea,
                     $fileitemid,
                 );
             } else {
-                $o .= get_string('countfiles', 'assignfeedback_file', $count);
+                $feedback['html'] = get_string('countfiles', 'assignfeedback_file', $count);
+            }
+
+            if ($overall) {
+                $data['filefeedback'][] = $feedback;
+            } else {
+                array_unshift($data['filefeedback'], $feedback);
             }
         }
-        return $o;
+
+        return $OUTPUT->render_from_template('assignfeedback_file/summary', $data);
     }
 
     /**
