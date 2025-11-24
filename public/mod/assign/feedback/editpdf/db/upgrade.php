@@ -28,6 +28,8 @@
  * @return bool
  */
 function xmldb_assignfeedback_editpdf_upgrade($oldversion) {
+    global $DB;
+    $dbman = $DB->get_manager();
 
     // Automatically generated Moodle v4.2.0 release upgrade line.
     // Put any upgrade step following this.
@@ -46,6 +48,38 @@ function xmldb_assignfeedback_editpdf_upgrade($oldversion) {
 
     // Automatically generated Moodle v5.1.0 release upgrade line.
     // Put any upgrade step following this.
+
+    if ($oldversion < 2025111900) {
+        $table = new xmldb_table('assignfeedback_editpdf_cmnt');
+        $field = new xmldb_field('markid', XMLDB_TYPE_INTEGER, '10', null, null, null, null, 'x');
+
+        if (!$dbman->field_exists($table, $field)) {
+            $dbman->add_field($table, $field);
+        }
+
+        $table = new xmldb_table('assignfeedback_editpdf_annot');
+        $field = new xmldb_field('markid', XMLDB_TYPE_INTEGER, '10', null, null, null, null, 'pageno');
+
+        if (!$dbman->field_exists($table, $field)) {
+            $dbman->add_field($table, $field);
+        }
+
+        $table = new xmldb_table('assignfeedback_editpdf_quick');
+        $field = new xmldb_field('markid', XMLDB_TYPE_INTEGER, '10', null, null, null, null, 'rawtext');
+
+        if (!$dbman->field_exists($table, $field)) {
+            $dbman->add_field($table, $field);
+        }
+
+        $table = new xmldb_table('assignfeedback_editpdf_rot');
+        $field = new xmldb_field('markid', XMLDB_TYPE_INTEGER, '10', null, null, null, null, 'pageno');
+
+        if (!$dbman->field_exists($table, $field)) {
+            $dbman->add_field($table, $field);
+        }
+
+        upgrade_plugin_savepoint(true, 2025111901, 'assignfeedback', 'editpdf');
+    }
 
     return true;
 }

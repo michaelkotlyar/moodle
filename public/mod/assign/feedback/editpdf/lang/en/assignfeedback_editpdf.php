@@ -66,6 +66,7 @@ $string['jsrequired'] = 'JavaScript is required to annotate a PDF. Please enable
 $string['launcheditor'] = 'Launch PDF editor...';
 $string['line'] = 'Line';
 $string['loadingeditor'] = 'Loading PDF editor';
+$string['markercomment1'] = 'Marker {$a}';
 $string['navigatenext'] = 'Next page (Alt/Shift-Alt/Ctrl-Option + {$a})';
 $string['navigateprevious'] = 'Previous page (Alt/Shift-Alt/Ctrl-Option + {$a})';
 $string['oval'] = 'Oval';

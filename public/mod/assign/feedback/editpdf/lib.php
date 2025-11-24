@@ -71,13 +71,17 @@ function assignfeedback_editpdf_pluginfile(
     }
 
     if ($context->contextlevel == CONTEXT_MODULE) {
-
         require_login($course, false, $cm);
+
         $itemid = (int)array_shift($args);
+        $gradeid = $itemid;
 
+        if (str_ends_with($filearea, '_marker')) {
+            $gradeid = $DB->get_field('assign_mark', 'gradeid', ['id' => $itemid]);
+        }
+
+        $record = $DB->get_record('assign_grades', ['id' => $gradeid], 'userid, assignment', MUST_EXIST);
         $assign = new assign($context, $cm, $course);
-
-        $record = $DB->get_record('assign_grades', array('id' => $itemid), 'userid,assignment', MUST_EXIST);
         $userid = $record->userid;
         if ($assign->get_instance()->id != $record->assignment) {
             return false;

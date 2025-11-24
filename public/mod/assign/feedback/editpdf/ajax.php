@@ -39,11 +39,20 @@ $assignmentid = required_param('assignmentid', PARAM_INT);
 $userid = required_param('userid', PARAM_INT);
 $attemptnumber = required_param('attemptnumber', PARAM_INT);
 $readonly = optional_param('readonly', false, PARAM_BOOL);
+$graderid = optional_param('graderid', 0, PARAM_INT);
+$ismarking = optional_param('ismarking', false, PARAM_BOOL);
 
 $cm = \get_coursemodule_from_instance('assign', $assignmentid, 0, false, MUST_EXIST);
 $context = \context_module::instance($cm->id);
 
 $assignment = new \assign($context, null, null);
+$grade = $assignment->get_user_grade($userid, true, $attemptnumber);
+
+$markid = null;
+if ($ismarking) {
+    $assignment->set_is_marking(true);
+    $markid = $assignment->get_mark($grade->id, $graderid, true)->id;
+}
 
 require_login($assignment->get_course(), false, $cm);
 
@@ -92,7 +101,7 @@ if ($action === 'pollconversions') {
             'pages' => [],
         ];
 
-        $combineddocument = document_services::get_combined_document_for_attempt($assignment, $userid, $attemptnumber);
+        $combineddocument = document_services::get_combined_document_for_attempt($assignment, $userid, $attemptnumber, $markid);
         $response->status = $combineddocument->get_status();
         $response->filecount = $combineddocument->get_document_count();
 
@@ -102,7 +111,7 @@ if ($action === 'pollconversions') {
         if (in_array($response->status, $readystatuslist)) {
             // It seems that the files for this submission haven't been combined in cron yet.
             // Try to combine them in the user session.
-            $combineddocument = document_services::get_combined_pdf_for_attempt($assignment, $userid, $attemptnumber);
+            $combineddocument = document_services::get_combined_pdf_for_attempt($assignment, $userid, $attemptnumber, $markid);
             $response->status = $combineddocument->get_status();
             $response->filecount = $combineddocument->get_document_count();
         }
@@ -122,18 +131,23 @@ if ($action === 'pollconversions') {
             if ($readonly) {
                 $filearea = document_services::PAGE_IMAGE_READONLY_FILEAREA;
             }
+            [$filearea, $fileitemid] = document_services::get_file_area_and_id($assignment, $grade, $filearea);
+            $markid = $assignment->is_marking() ? $fileitemid : null;
+
             $response->partial = $combineddocument->is_partial_conversion();
 
             foreach ($pages as $id => $pagefile) {
                 $index = count($response->pages);
                 $page = new stdClass();
                 $comments = page_editor::get_comments($grade->id, $index, $draft);
-                $page->url = moodle_url::make_pluginfile_url($context->id,
-                                                            'assignfeedback_editpdf',
-                                                            $filearea,
-                                                            $grade->id,
-                                                            '/',
-                                                            $pagefile->get_filename())->out();
+                $page->url = moodle_url::make_pluginfile_url(
+                    $context->id,
+                    'assignfeedback_editpdf',
+                    $filearea,
+                    $fileitemid,
+                    '/',
+                    $pagefile->get_filename(),
+                )->out();
                 $page->comments = $comments;
                 if ($imageinfo = $pagefile->get_imageinfo()) {
                     $page->width = $imageinfo['width'];
@@ -142,16 +156,16 @@ if ($action === 'pollconversions') {
                     $page->width = 0;
                     $page->height = 0;
                 }
-                $annotations = page_editor::get_annotations($grade->id, $index, $draft);
+                $annotations = page_editor::get_annotations($grade->id, $index, $draft, $markid);
                 $page->annotations = $annotations;
                 $response->pages[] = $page;
             }
 
             $component = 'assignfeedback_editpdf';
-            $filearea = document_services::PAGE_IMAGE_FILEAREA;
+            [$filearea, $fileitemid] = document_services::get_file_area_and_id($assignment, $grade, $filearea, false, $markid);
             $filepath = '/';
             $fs = get_file_storage();
-            $files = $fs->get_directory_files($context->id, $component, $filearea, $grade->id, $filepath);
+            $files = $fs->get_directory_files($context->id, $component, $filearea, $fileitemid, $filepath);
             $response->pageready = count($files);
         }
     } catch (\Throwable $e) {
@@ -179,7 +193,7 @@ if ($action === 'pollconversions') {
     if ($added != count($page->comments)) {
         array_push($response->errors, get_string('couldnotsavepage', 'assignfeedback_editpdf', $index+1));
     }
-    $added = page_editor::set_annotations($grade->id, $index, $page->annotations);
+    $added = page_editor::set_annotations($grade->id, $index, $page->annotations, $markid);
     if ($added != count($page->annotations)) {
         array_push($response->errors, get_string('couldnotsavepage', 'assignfeedback_editpdf', $index+1));
     }
@@ -192,16 +206,19 @@ if ($action === 'pollconversions') {
     $response = new stdClass();
     $grade = $assignment->get_user_grade($userid, true, $attemptnumber);
     $file = document_services::generate_feedback_document($assignment, $userid, $attemptnumber);
+    [$filearea, $fileitemid] = document_services::get_file_area_and_id($assignment, $grade, createmarkifmissing: true);
 
     $response->url = '';
     if ($file) {
-        $url = moodle_url::make_pluginfile_url($assignment->get_context()->id,
-                                               'assignfeedback_editpdf',
-                                               document_services::FINAL_PDF_FILEAREA,
-                                               $grade->id,
-                                               '/',
-                                               $file->get_filename(),
-                                               false);
+        $url = moodle_url::make_pluginfile_url(
+            $assignment->get_context()->id,
+            'assignfeedback_editpdf',
+            $filearea,
+            $fileitemid,
+            '/',
+            $file->get_filename(),
+            false,
+        );
         $response->url = $url->out(true);
         $response->filename = $file->get_filename();
     }
@@ -230,9 +247,8 @@ if ($action === 'pollconversions') {
 } else if ($action == 'revertchanges') {
     require_capability('mod/assign:grade', $context);
 
-    $grade = $assignment->get_user_grade($userid, true, $attemptnumber);
 
-    $result = page_editor::revert_drafts($gradeid);
+    $result = page_editor::revert_drafts($grade->id);
 
     echo json_encode($result);
     die();
@@ -249,7 +265,7 @@ if ($action === 'pollconversions') {
     require_capability('mod/assign:grade', $context);
 
     $grade = $assignment->get_user_grade($userid, true, $attemptnumber);
-    $result = document_services::delete_feedback_document($assignment, $userid, $attemptnumber);
+    $result = document_services::delete_feedback_document($assignment, $userid, $attemptnumber, $ismarking);
 
     $result = $result && page_editor::unrelease_drafts($grade->id);
     echo json_encode($result);
@@ -260,11 +276,18 @@ if ($action === 'pollconversions') {
     $index = required_param('index', PARAM_INT);
     $grade = $assignment->get_user_grade($userid, true, $attemptnumber);
     $rotateleft = required_param('rotateleft', PARAM_BOOL);
-    $filearea = document_services::PAGE_IMAGE_FILEAREA;
-    $pagefile = document_services::rotate_page($assignment, $userid, $attemptnumber, $index, $rotateleft);
-    $page = new stdClass();
-    $page->url = moodle_url::make_pluginfile_url($context->id, document_services::COMPONENT, $filearea,
-        $grade->id, '/', $pagefile->get_filename())->out();
+    [$filearea, $fileitemid] = document_services::get_file_area_and_id($assignment, $grade, document_services::PAGE_IMAGE_FILEAREA);
+    $pagefile = document_services::rotate_page($assignment, $userid, $attemptnumber, $index, $rotateleft, $ismarking);
+    $page = (object) [
+        'url' => moodle_url::make_pluginfile_url(
+            $context->id,
+            document_services::COMPONENT,
+            $filearea,
+            $fileitemid,
+            '/',
+            $pagefile->get_filename(),
+        )->out(),
+    ];
     if ($imageinfo = $pagefile->get_imageinfo()) {
         $page->width = $imageinfo['width'];
         $page->height = $imageinfo['height'];

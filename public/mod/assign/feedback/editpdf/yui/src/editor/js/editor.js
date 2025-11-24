@@ -457,6 +457,8 @@ EDITOR.prototype = {
     poll_document_conversion_status: function() {
         var requestUserId = this.get('userid');
 
+        console.log('michaelcity [editor.js:460]')
+
         Y.io(AJAXBASE, {
             method: 'get',
             context: this,
@@ -467,7 +469,9 @@ EDITOR.prototype = {
                 userid: this.get('userid'),
                 attemptnumber: this.get('attemptnumber'),
                 assignmentid: this.get('assignmentid'),
-                readonly: this.get('readonly') ? 1 : 0
+                readonly: this.get('readonly') ? 1 : 0,
+                ismarking: this.get('ismarking') ? 1 : 0,
+                graderid: this.get('graderid'),
             },
             on: {
                 success: function(tid, response) {
@@ -545,6 +549,9 @@ EDITOR.prototype = {
      * @method get_images_for_documents
      */
     start_document_to_image_conversion: function() {
+
+        console.log('michaelcity [editor.js:551]')
+
         Y.io(AJAXBASE, {
             method: 'get',
             context: this,
@@ -555,7 +562,9 @@ EDITOR.prototype = {
                 userid: this.get('userid'),
                 attemptnumber: this.get('attemptnumber'),
                 assignmentid: this.get('assignmentid'),
-                readonly: this.get('readonly') ? 1 : 0
+                readonly: this.get('readonly') ? 1 : 0,
+                ismarking: this.get('ismarking') ? 1 : 0,
+                graderid: this.get('graderid'),
             },
             on: {
                 success: function(tid, response) {
@@ -696,7 +705,9 @@ EDITOR.prototype = {
                 action: 'conversionstatus',
                 userid: this.get('userid'),
                 attemptnumber: this.get('attemptnumber'),
-                assignmentid: this.get('assignmentid')
+                assignmentid: this.get('assignmentid'),
+                ismarking: this.get('ismarking') ? 1 : 0,
+                graderid: this.get('graderid'),
             },
             on: {
                 success: function(tid, response) {
@@ -1271,7 +1282,9 @@ EDITOR.prototype = {
                 'userid': this.get('userid'),
                 'attemptnumber': this.get('attemptnumber'),
                 'assignmentid': this.get('assignmentid'),
-                'page': this.stringify_current_page()
+                'page': this.stringify_current_page(),
+                'ismarking': this.get('ismarking') ? 1 : 0,
+                'graderid': this.get('graderid'),
             },
             on: {
                 success: function(tid, response) {
@@ -1538,7 +1551,9 @@ EDITOR.prototype = {
                 'userid': this.get('userid'),
                 'attemptnumber': this.get('attemptnumber'),
                 'assignmentid': this.get('assignmentid'),
-                'rotateleft': left
+                'rotateleft': left,
+                'ismarking': this.get('ismarking') ? 1 : 0,
+                'graderid': this.get('graderid'),
             },
             on: {
                 success: function(tid, response) {
@@ -1697,7 +1712,15 @@ Y.extend(EDITOR, Y.Base, EDITOR.prototype, {
         stampfiles: {
             validator: Y.Lang.isArray,
             value: ''
-        }
+        },
+        graderid: {
+            validator: Y.Lang.isInteger,
+            value: 0
+        },
+        ismarking: {
+            validator: Y.Lang.isBoolean,
+            value: false
+        },
     }
 });
 

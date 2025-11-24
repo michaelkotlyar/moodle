@@ -36,9 +36,10 @@ class comments_quick_list {
 
     /**
      * Get all comments for the current user.
+     * @param ?int $mark ID of the mark to filter comments by mark.
      * @return array(comment)
      */
-    public static function get_comments() {
+    public static function get_comments(?int $mark = null) {
         global $DB, $USER;
 
         $comments = array();
