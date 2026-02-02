@@ -27,10 +27,11 @@ Feature: Quiz group override
       | student3 | C1     | student        |
       | helper   | C1     | teacher        |
     And the following "groups" exist:
-      | name    | course | idnumber |
-      | Group 1 | C1     | G1       |
-      | Group 2 | C1     | G2       |
-      | Group 3 | C1     | G3       |
+      | name    | course | idnumber | visibility |
+      | Group 1 | C1     | G1       | 0          |
+      | Group 2 | C1     | G2       | 0          |
+      | Group 3 | C1     | G3       | 0          |
+      | Group 4 | C1     | G4       | 3          |
     And the following "group members" exist:
       | user     | group |
       | student1 | G1    |
@@ -74,8 +75,13 @@ Feature: Quiz group override
     And I set the following fields to these values:
       | Override group   | Group 3 |
       | Attempts allowed | 2       |
+    And I press "Save and enter another override"
+    And I set the following fields to these values:
+      | Override group   | Group 4 |
+      | Attempts allowed | 2       |
     And I press "Save"
     Then "Group 1" "table_row" should exist
+    Then "Group 4" "table_row" should exist
     # Check all column headers are present.
     And I should see "Group" in the "Overrides" "table_row"
     And I should see "Action" in the "Overrides" "table_row"
@@ -85,11 +91,13 @@ Feature: Quiz group override
       | quiz      | group | attempts |
       | Test quiz | G1    | 2        |
       | Test quiz | G2    | 2        |
+      | Test quiz | G4    | 2        |
     When I am on the "Test quiz" "mod_quiz > View" page logged in as "teacher1"
-    Then I should see "Settings overrides exist (Groups: 2)"
-    And I follow "Groups: 2"
+    Then I should see "Settings overrides exist (Groups: 3)"
+    And I follow "Groups: 3"
     And "Group 1" "table_row" should exist
     And "Group 2" "table_row" should exist
+    And "Group 4" "table_row" should exist
 
   Scenario: A teacher without accessallgroups permission should only see the group overrides within his/her groups, when the activity's group mode is "separate groups"
     Given the following "permission overrides" exist:
@@ -99,11 +107,13 @@ Feature: Quiz group override
       | quiz      | group | attempts |
       | Test quiz | G1    | 2        |
       | Test quiz | G2    | 2        |
+      | Test quiz | G4    | 2        |
     When I am on the "Test quiz" "mod_quiz > View" page logged in as "teacher1"
     Then I should see "Settings overrides exist (Groups: 1) for your groups"
     And I follow "Groups: 1"
     Then "Group 1" "table_row" should exist
     And "Group 2" "table_row" should not exist
+    And "Group 4" "table_row" should not exist
 
   Scenario: A non-editing teacher can see the overrides, but not change them
     Given the following "mod_quiz > group overrides" exist:
@@ -118,13 +128,13 @@ Feature: Quiz group override
     And "Copy" "link" should not exist in the "Group 1" "table_row"
     And "Delete" "link" should not exist in the "Group 1" "table_row"
 
-  Scenario: "Not visible" groups should not be available for group overrides
+  Scenario: "Not visible" groups should be available for group overrides
     Given the following "groups" exist:
-      | name                                 | course | idnumber | visibility | participation |
+      | name                                      | course | idnumber | visibility | participation |
       | Visible to everyone/Participation         | C1     | VP       | 0          | 1             |
       | Only visible to members/Participation     | C1     | MP       | 1          | 1             |
       | Only see own membership                   | C1     | O        | 2          | 0             |
-      | Not visible                          | C1     | N        | 3          | 0             |
+      | Not visible                               | C1     | N        | 3          | 0             |
       | Visible to everyone/Non-Participation     | C1     | VN       | 0          | 0             |
       | Only visible to members/Non-Participation | C1     | MN       | 1          | 0             |
     When I am on the "quiz1" Activity page logged in as teacher1
@@ -136,6 +146,29 @@ Feature: Quiz group override
     And I should see "Only visible to members" in the "Override group" "select"
     And I should see "Only visible to members/Non-Participation" in the "Override group" "select"
     And I should see "Only see own membership" in the "Override group" "select"
+    And I should see "Not visible" in the "Override group" "select"
+
+  Scenario: "Not visible" groups should not be available for group overrides for users without permission to see them
+    Given the following "groups" exist:
+      | name                                      | course | idnumber | visibility | participation |
+      | Visible to everyone/Participation         | C1     | VP       | 0          | 1             |
+      | Only visible to members/Participation     | C1     | MP       | 1          | 1             |
+      | Only see own membership                   | C1     | O        | 2          | 0             |
+      | Not visible                               | C1     | N        | 3          | 0             |
+      | Visible to everyone/Non-Participation     | C1     | VN       | 0          | 0             |
+      | Only visible to members/Non-Participation | C1     | MN       | 1          | 0             |
+    And the following "permission overrides" exist:
+      | capability                     | permission | role           | contextlevel | reference |
+      | moodle/course:viewhiddengroups | Prevent    | editingteacher | Course       | C1        |
+    When I am on the "quiz1" Activity page logged in as teacher1
+    And I navigate to "Overrides" in current page administration
+    And I select "Group overrides" from the "jump" singleselect
+    And I press "Add group override"
+    Then I should see "Visible to everyone/Participation" in the "Override group" "select"
+    And I should see "Visible to everyone/Non-Participation" in the "Override group" "select"
+    And I should not see "Only visible to members" in the "Override group" "select"
+    And I should not see "Only visible to members/Non-Participation" in the "Override group" "select"
+    And I should not see "Only see own membership" in the "Override group" "select"
     And I should not see "Not visible" in the "Override group" "select"
 
   @javascript

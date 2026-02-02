@@ -101,7 +101,7 @@ if ($groupmode) {
         list($insql, $inparams) = $DB->get_in_or_equal(array_keys($groups), SQL_PARAMS_NAMED);
         $params += $inparams;
 
-        $sql = "SELECT o.*, g.name
+        $sql = "SELECT o.*, g.name, g.visibility
                   FROM {quiz_overrides} o
                   JOIN {groups} g ON o.groupid = g.id
                  WHERE o.quiz = :quizid AND g.id $insql
@@ -176,6 +176,7 @@ $overridedeleteurl = new moodle_url('/mod/quiz/overridedelete.php');
 $overrideediturl = new moodle_url('/mod/quiz/overrideedit.php');
 
 $hasinactive = false; // Whether there are any inactive overrides.
+$canviewallgroups = has_capability('moodle/course:viewhiddengroups', $context);
 
 foreach ($overrides as $override) {
 
@@ -188,6 +189,11 @@ foreach ($overrides as $override) {
         } else if (!\core_availability\info_module::is_user_visible($cm, $override->userid)) {
             // User cannot access the module.
             $active = false;
+        }
+    } else {
+        // Skip hidden group unless user can view hidden groups.
+        if ((int) $override->visibility === GROUPS_VISIBILITY_NONE && !$canviewallgroups) {
+            continue;
         }
     }
     if (!$active) {

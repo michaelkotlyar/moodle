@@ -132,6 +132,7 @@ $string['groups'] = 'Groups';
 $string['groupscount'] = 'Groups ({$a})';
 $string['groupsettingsheader'] = 'Groups';
 $string['groupsgroupings'] = 'Groups & groupings';
+$string['groupshidden'] = 'Hidden groups';
 $string['groupsinselectedgrouping'] = 'Groups in:';
 $string['groupsnone'] = 'No groups';
 $string['groupsonly'] = 'Groups only';

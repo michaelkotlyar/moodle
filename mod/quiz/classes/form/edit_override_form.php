@@ -116,19 +116,31 @@ class edit_override_form extends moodleform {
                 }
 
                 $groupchoices = [];
+                $visiblegroups = [];
+                $hiddengroups = [];
                 foreach ($groups as $group) {
                     if ($group->visibility != GROUPS_VISIBILITY_NONE) {
-                        $groupchoices[$group->id] = format_string($group->name, true, ['context' => $this->context]);
+                        $visiblegroups[$group->id] = $group->name;
+                    } else {
+                        $hiddengroups[$group->id] = $group->name;
                     }
                 }
                 unset($groups);
 
-                if (count($groupchoices) == 0) {
-                    $groupchoices[0] = get_string('none');
+                if (count($visiblegroups) == 0) {
+                    $visiblegroups[0] = get_string('none');
                 }
 
-                $mform->addElement('select', 'groupid',
-                        get_string('overridegroup', 'quiz'), $groupchoices);
+                if ($accessallgroups && !empty($hiddengroups)) {
+                    $groupchoices = [
+                        get_string('groupsvisible', 'group') => $visiblegroups,
+                        get_string('groupshidden', 'group') => $hiddengroups,
+                    ];
+                    $mform->addElement('selectgroups', 'groupid', get_string('overridegroup', 'quiz'), $groupchoices);
+                } else {
+                    $groupchoices = $visiblegroups;
+                    $mform->addElement('select', 'groupid', get_string('overridegroup', 'quiz'), $groupchoices);
+                }
                 $mform->addRule('groupid', get_string('required'), 'required', null, 'client');
             }
         } else {

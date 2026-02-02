@@ -1029,4 +1029,42 @@ final class lib_test extends \advanced_testcase {
             $this->assertEquals($newvalue, $result['value']);
         }
     }
+
+    /**
+     * Create and apply a quiz override for a hidden group.
+     *
+     * @covers ::quiz_update_effective_access
+     */
+    public function test_create_and_retrieve_hidden_group_override(): void {
+        $this->setAdminUser();
+        $this->resetAfterTest();
+        $generator = $this->getDataGenerator();
+
+        // Create course, quiz, user and hidden group - enrol user to course and group.
+        $course = $generator->create_course();
+        $quiz = $this->create_test_quiz($course);
+        $user = $generator->create_and_enrol($course, 'student');
+        $groupid = groups_create_group((object) [
+            'courseid' => $course->id,
+            'name' => 'test',
+            'visibility' => GROUPS_VISIBILITY_NONE,
+        ]);
+        $generator->create_group_member(['groupid' => $groupid, 'userid' => $user->id]);
+
+        // Override hidden quiz group.
+        $quizobj = quiz_settings::create($quiz->id, $user->id);
+        $overridedata = [
+            'quiz' => $quiz->id,
+            'groupid' => $groupid,
+            'password' => 'test',
+        ];
+        $manager = $quizobj->get_override_manager();
+        $overrideid = $manager->save_override($overridedata);
+        $overrides = $manager->get_all_overrides();
+        $this->assertCount(1, $overrides);
+
+        // Confirm hidden group override is applied.
+        $settings = quiz_update_effective_access($quiz, $user->id);
+        $this->assertEquals($settings->password, $overrides[$overrideid]->password);
+    }
 }

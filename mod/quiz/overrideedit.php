@@ -99,6 +99,14 @@ if ($action === 'duplicate') {
 // True if group-based override.
 $groupmode = !empty($data->groupid) || ($action === 'addgroup' && empty($overrideid));
 
+// Check user can view groupmode override if group is hidden.
+if ($groupmode && !empty($data->groupid)) {
+    $group = groups_get_group($data->groupid, 'visibility', MUST_EXIST);
+    if ((int) $group->visibility === GROUPS_VISIBILITY_NONE) {
+        require_capability('moodle/course:viewhiddengroups', $manager->context);
+    }
+}
+
 $overridelisturl = new moodle_url('/mod/quiz/overrides.php', ['cmid' => $cm->id]);
 if (!$groupmode) {
     $overridelisturl->param('mode', 'user');
