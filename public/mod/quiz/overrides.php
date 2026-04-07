@@ -22,8 +22,8 @@
  * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
 
-use mod_quiz\quiz_settings;
 use mod_quiz\access_manager;
+use mod_quiz\quiz_settings;
 
 require_once(__DIR__ . '/../../config.php');
 require_once($CFG->dirroot.'/mod/quiz/lib.php');
@@ -92,34 +92,12 @@ if (!empty($orphaned)) {
 $overrides = [];
 $colclasses = [];
 $headers = [];
+$overridemanager = $quizobj->get_override_manager();
 
-[$overrideselects, $overridejoins, $overrideparams] = access_manager::get_override_settings_sql('o');
-
-// Fetch all overrides.
 if ($groupmode) {
     $headers[] = get_string('group');
-    // To filter the result by the list of groups that the current user has access to.
-    if ($groups) {
-        $selects = 'o.*, g.name';
-        if (!empty($overrideselects)) {
-            $selects .= ', ' . $overrideselects;
-        }
-        $params = ['quizid' => $quiz->id];
-        list($insql, $inparams) = $DB->get_in_or_equal(array_keys($groups), SQL_PARAMS_NAMED);
-
-        $sql = "SELECT {$selects}
-                  FROM {quiz_overrides} o
-                  JOIN {groups} g ON o.groupid = g.id
-                       {$overridejoins}
-                 WHERE o.quiz = :quizid
-                       AND g.id $insql
-              ORDER BY g.name";
-
-        $overrides = $DB->get_records_sql($sql, array_merge($overrideparams, $params, $inparams));
-    }
-
+    $overrides = $overridemanager->get_group_overrides(array_keys($groups));
 } else {
-    // User overrides.
     $colclasses[] = 'colname';
     $headers[] = get_string('user');
     $userfieldsapi = \core_user\fields::for_identity($context)->with_name()->with_userpic();
@@ -129,37 +107,7 @@ if ($groupmode) {
         $colclasses[] = 'col' . $field;
         $headers[] = \core_user\fields::get_display_name($field);
     }
-
-    list($sort, $params) = users_order_by_sql('u', null, $context, $extrauserfields);
-    $params['quizid'] = $quiz->id;
-
-    if ($showallgroups) {
-        $groupsjoin = '';
-        $groupswhere = '';
-
-    } else if ($groups) {
-        list($insql, $inparams) = $DB->get_in_or_equal(array_keys($groups), SQL_PARAMS_NAMED);
-        $groupsjoin = 'JOIN {groups_members} gm ON u.id = gm.userid';
-        $groupswhere = ' AND gm.groupid ' . $insql;
-        $params += $inparams;
-
-    } else {
-        // User cannot see any data.
-        $groupsjoin = '';
-        $groupswhere = ' AND 1 = 2';
-    }
-
-    $sql = "SELECT o.*, {$overrideselects}, {$userfieldssql->selects}
-              FROM {quiz_overrides} o
-              JOIN {user} u ON u.id = o.userid
-                   {$userfieldssql->joins}
-                   {$overridejoins}
-                   {$groupsjoin}
-             WHERE o.quiz = :quizid
-                   {$groupswhere}
-          ORDER BY $sort";
-    $params = array_merge($params, $userfieldssql->params, $overrideparams);
-    $overrides = $DB->get_records_sql($sql, $params);
+    $overrides = $overridemanager->get_user_overrides();
 }
 
 // Initialise table.

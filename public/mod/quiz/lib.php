@@ -237,21 +237,13 @@ function quiz_delete_instance($id) {
  */
 function quiz_update_effective_access($quiz, $userid) {
     global $DB;
-    [$selects, $joins, $params] = access_manager::get_override_settings_sql('o');
-    $hasaccessruleoverrides = !empty($selects);
 
-    // Check for user override.
-    if ($hasaccessruleoverrides) {
-        $sql = "SELECT o.*, {$selects}
-                  FROM {quiz_overrides} o
-                       {$joins}
-                 WHERE o.quiz = ?
-                   AND o.userid = ?";
-        $override = $DB->get_record_sql($sql, array_merge($params, [$quiz->id, $userid]));
-    } else {
-        $override = $DB->get_record('quiz_overrides', ['quiz' => $quiz->id, 'userid' => $userid]);
-    }
+    $quizobj = quiz_settings::create($quiz->id);
+    $accessmanager = $quizobj->get_access_manager(time());
+    $overridemanager = $quizobj->get_override_manager();
+    $override = $overridemanager->get_user_override($userid);
 
+    $hasaccessruleoverrides = !empty($override);
     if (!$override) {
         $override = new stdClass();
         $override->timeopen = null;
@@ -266,15 +258,7 @@ function quiz_update_effective_access($quiz, $userid) {
 
     if (!empty($groupings[0])) {
         // Select all overrides that apply to the User's groups.
-        [$extra, $params] = $DB->get_in_or_equal(array_values($groupings[0]));
-        $accessrulesqlselects = $hasaccessruleoverrides ? ", $selects" : '';
-        $sql = "SELECT o.*{$accessrulesqlselects}
-                  FROM {quiz_overrides} o
-                       {$joins}
-                 WHERE groupid {$extra}
-                   AND quiz = ?";
-        $params[] = $quiz->id;
-        $records = $DB->get_records_sql($sql, $params);
+        $records = $overridemanager->get_group_overrides(array_keys($groupings[0]));
 
         // Combine the overrides.
         $opens = [];
@@ -335,7 +319,7 @@ function quiz_update_effective_access($quiz, $userid) {
     }
 
     // Merge with quiz defaults.
-    $accessrulekeys = access_manager::get_override_settings();
+    $accessrulekeys = access_manager::get_override_setting_names();
     $keys = ['timeopen', 'timeclose', 'timelimit', 'attempts', 'password', 'extrapasswords', ...$accessrulekeys];
     foreach ($keys as $key) {
         if (isset($override->{$key})) {

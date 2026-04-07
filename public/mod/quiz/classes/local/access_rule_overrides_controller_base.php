@@ -16,36 +16,42 @@
 
 namespace mod_quiz\local;
 
-use MoodleQuickForm;
-use context_module;
 use context;
+use context_module;
+use mod_quiz\form\edit_override_form;
+use MoodleQuickForm;
 
 /**
- * Class access_override_rule_base
+ * Class access_rule_overrides_controller_base
+ * 
+ * TODO: PHPDOC
  *
  * @package    mod_quiz
  * @copyright  2025 Michael Kotlyar <michael.kotlyar@catalyst-eu.net>
  * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
-abstract class access_override_rule_base {
+abstract class access_rule_overrides_controller_base {
     /**
-     * Add fields to the quiz override form. To remain consistent with other access rules, you must
+     * Add fields to the quiz override form.
+     *
+     * TODO: PHPDOC
+     *
+     * To remain consistent with other access rules, you must
      * create a header element at the top and the header should only be expanded if the override for
      * this rule has been configured.
+     *
      * E.g. $mform->addElement('header', 'accessrule', $title);
      * $mform->setExpanded('accessrule', $override && $override->enabled);
      *
-     * @param context_module $context
-     * @param int $overrideid
-     * @param object $quiz
-     * @param MoodleQuickForm $mform
+     * @param edit_override_form $form
      */
-    public static function add_form_fields(context_module $context, int $overrideid, object $quiz, MoodleQuickForm $mform): void {
-        // Do nothing.
+    public static function add_form_fields(edit_override_form $form): void {
     }
 
     /**
      * Validate the data from any form fields added using {@see add_form_fields()}.
+     *
+     * TODO: PHPDOC
      *
      * @param array $errors the errors found so far.
      * @param array $data the submitted form data.
@@ -57,7 +63,7 @@ abstract class access_override_rule_base {
         array $errors,
         array $data,
         array $files,
-        context_module $context,
+        edit_override_form $mform,
     ): array {
         return [];
     }
@@ -65,35 +71,43 @@ abstract class access_override_rule_base {
     /**
      * Save any submitted settings when the quiz override settings form is submitted.
      *
+     * TODO: PHPDOC
+     *
      * @param array $override data from the override form.
      */
     public static function save_settings(array $override): void {
-        // Do nothing.
     }
 
     /**
      * Delete any rule-specific override settings when the quiz override is deleted.
      *
+     * TODO: PHPDOC
+     *
      * @param int $quizid all overrides being deleted should belong to the same quiz.
      * @param array $overrides an array of override objects to be deleted.
      */
     public static function delete_settings(int $quizid, array $overrides): void {
-        // Do nothing.
     }
 
     /**
-     * Provide form field keys in the override form as a string array
+     * Returns all form field keys in the override form as a string array.
      *
-     * @return array e.g. ['rule_enabled', 'rule_password'].
+     * The fields will be placed in the override form along with other settings that can be overridden so make sure that the values
+     * will be unique, e.g. ['specificpluginrule_enabled', 'specificpluginrule_password']
+     *
+     * @return array An array of field key strings
      */
     public static function get_settings(): array {
         return [];
     }
 
     /**
-     * Provide required form field keys in the override form as a string array
+     * Returns the required form field keys in the override form as a string array.
      *
-     * @return array e.g. ['rule_enabled'].
+     * The fields will be placed in the override form along with other settings that can be overridden so make sure that the values
+     * will be unique, e.g. ['specificpluginrule_enabled', 'specificpluginrule_password']
+     *
+     * @return array An array of field key strings
      */
     public static function get_required_settings(): array {
         return [];
@@ -103,6 +117,8 @@ abstract class access_override_rule_base {
      * Get components of the SQL query to fetch the access rule components' override
      * settings. To be used as part of a quiz_override query to reference.
      *
+     * TODO: PHPDOC
+     *
      * @param string $overridetablename Name of the table to reference for joins.
      * @return array [$selects, $joins, $params']
      */
@@ -111,23 +127,30 @@ abstract class access_override_rule_base {
     }
 
     /**
-     * Update fields and values of the override table using the override settings.
+     * Add fields and their respective values to be displayed in the overrides HTML table.
      *
-     * @param object $override the override data to use to update the $fields and $values.
-     * @param array $fields the fields to populate.
-     * @param array $values the fields to populate.
+     * TODO: PHPDOC
+     *
+     * @param stdClass $override the override data to use to update the $fields and $values
+     * @param array $fields the access rule fields to display, e.g, [..., 'Enabled']
+     * @param array $values the value of the field at the same index, e.g, [..., 'Yes']
      * @param context $context the context of which the override is being applied to.
-     * @return array [$fields, $values]
+     * @return array an array of the updated fields and values, e.g. [$fields, $values]
      */
-    public static function add_table_fields(object $override, array $fields, array $values, context $context): array {
-        return [];
+    public static function add_table_fields(\stdClass $override, array $fields, array $values, context_module $context): array {
+        return [$fields, $values];
     }
 
     /**
      * Clean override form data.
      *
+     * If the values of the access rule override settings are 'empty' or have no effect in the override, we should clear them so
+     * that the form can recognise that the access rule override is not filled in so that the form can invalidate the submission
+     * if the rest of the submission is also left unfilled. In the typical case, we would check if the access rule override is
+     * enabled, if it is not, but set to '0', we set the value to null.
+     *
      * @param array $formdata
-     * @return array
+     * @return array Cleaned form data
      */
     public static function clean_form_data(array $formdata): array {
         return $formdata;
