@@ -35,6 +35,7 @@ use lang_string;
 use moodle_exception;
 use moodle_url;
 use mod_quiz\local\override_manager;
+use mod_quiz\quiz_settings;
 
 defined('MOODLE_INTERNAL') || die();
 
@@ -204,47 +205,57 @@ class seb_quiz_settings extends persistent {
      * This method gets data from cache before doing any DB calls.
      *
      * @param int $quizid Quiz id.
-     * @return false|seb_quiz_settings
+     * @return ?seb_quiz_settings
      */
-    public static function get_by_quiz_id(int $quizid) {
-        if ($data = self::get_quiz_settings_cache()->get(self::get_cache_key($quizid))) {
+    public static function get_by_quiz_id(int $quizid): ?seb_quiz_settings {
+        if ($data = self::get_quiz_settings_cache()->get(self::get_settings_cache_key($quizid))) {
             return new static(0, $data);
         }
 
-        return self::get_settings(['quizid' => $quizid]) ?: false;
+        return self::get_settings(['quizid' => $quizid]);
     }
 
     /**
      * Return an instance by quiz id and apply an override if available. Similar to self::get_records.
      *
+     * TODO: PHPDOC
+     *
      * @param array $filters conditions used to query seb_quiz_settings.
      * @return ?seb_quiz_settings
      */
-    public static function get_settings(array $filters = []) {
+    public static function get_settings(array $filters = []): ?seb_quiz_settings {
+        global $USER;
         $sebquizsetting = self::get_record($filters) ?: null;
+        $quizid = null;
 
         if ($sebquizsetting || $filters['quizid']) {
             $quizid = $filters['quizid'] ?? $sebquizsetting->get('quizid');
 
             // Overwrite settings if available.
-            if ($override = override_manager::get_quiz_override($quizid)) {
-                // Create blank seb_quiz_settings instance if none exists.
-                if (!$sebquizsetting) {
-                    $record = (object)[
-                        'quizid' => $quizid,
-                        'cmid' => get_coursemodule_from_instance('quiz', $quizid)->id,
-                    ];
-                    $sebquizsetting = new self(0, $record);
-                }
+            $override = override_manager::fetch_override_by_user_quiz($USER->id, $quizid);
+            if ($override) {
+                $sebquizsetting = self::override_settings($override, $sebquizsetting);
+            }
+        }
 
-                // Overwrite settings if enabled.
-                if (isset($override->seb_enabled) && (bool) $override->seb_enabled) {
-                    $prefix = 'seb_';
-                    foreach (array_keys(self::properties_definition()) as $key) {
-                        if (isset($override->{$prefix . $key})) {
-                            $sebquizsetting->set($key, $override->{$prefix . $key});
-                        }
-                    }
+        return $sebquizsetting;
+    }
+
+    protected static function override_settings(\stdClass $override, ?self $sebquizsetting): self {
+        if (!$sebquizsetting) {
+            $record = (object)[
+                'quizid' => $override->quiz,
+                'cmid' => get_coursemodule_from_instance('quiz', $override->quiz)->id,
+            ];
+            $sebquizsetting = new self(0, $record);
+        }
+
+        // Overwrite settings if enabled.
+        if (isset($override->seb_enabled) && (bool) $override->seb_enabled) {
+            $prefix = 'seb_';
+            foreach (array_keys(self::properties_definition()) as $key) {
+                if (isset($override->{$prefix . $key})) {
+                    $sebquizsetting->set($key, $override->{$prefix . $key});
                 }
             }
         }
@@ -259,7 +270,7 @@ class seb_quiz_settings extends persistent {
      * @return string|null
      */
     public static function get_config_by_quiz_id(int $quizid): ?string {
-        $cachekey = self::get_cache_key($quizid);
+        $cachekey = self::get_settings_cache_key($quizid);
         $config = self::get_config_cache()->get($cachekey);
 
         if ($config !== false) {
@@ -282,7 +293,7 @@ class seb_quiz_settings extends persistent {
      * @return string|null
      */
     public static function get_config_key_by_quiz_id(int $quizid): ?string {
-        $cachekey = self::get_cache_key($quizid);
+        $cachekey = self::get_settings_cache_key($quizid);
         $configkey = self::get_config_key_cache()->get($cachekey);
 
         if ($configkey !== false) {
@@ -326,6 +337,20 @@ class seb_quiz_settings extends persistent {
     }
 
     /**
+     * Return key that represents the settings the user in a quiz is using.
+     *
+     * Indexed by "$userid-$quizid", if it returns 0 or false, the user uses
+     * the bases SEB settings, searching the other caches with the just "$quizid".
+     * If a greater number, there is an override and the config caches must
+     * be searched with "$quizid-$overrideid".
+     *
+     * @return \cache_application
+     */
+    private static function get_key_cache(): \cache_application {
+        return \cache::make('quizaccess_seb', 'keys');
+    }
+
+    /**
      * Adds the new record to the cache.
      */
     protected function after_create() {
@@ -346,29 +371,83 @@ class seb_quiz_settings extends persistent {
      */
     private function after_save() {
         $quizid = $this->get('quizid');
-        $cachekey = self::get_cache_key($quizid);
-        self::get_quiz_settings_cache()->set($cachekey, $this->to_record());
-        self::get_config_cache()->set($cachekey, $this->config);
-        self::get_config_key_cache()->set($cachekey, $this->configkey);
+        self::get_quiz_settings_cache()->set($quizid, $this->to_record());
+        self::get_config_cache()->set($quizid, $this->config);
+        self::get_config_key_cache()->set($quizid, $this->configkey);
     }
 
-    /**
-     * Removes unnecessary stuff from db.
-     */
+    #[\Override]
     protected function before_delete() {
-        $cachekey = self::get_cache_key($this->get('quizid'));
-        self::delete_cache($cachekey);
+        global $DB;
+        $quizid = $this->get('quizid');
+        $qscache = self::get_quiz_settings_cache();
+        $ccache = self::get_config_cache();
+        $ckcache = self::get_config_key_cache();
+
+        $qscache->delete($quizid);
+        $ccache->delete($quizid);
+        $ckcache->delete($quizid);
+
+        $sql = "SELECT qo.id
+                  FROM {quiz_overrides} qo
+                  JOIN {quizaccess_seb_override} qso
+                    ON qo.quiz = ?
+                   AND qso.overrideid = qo.id";
+        $overrideids = $DB->get_fieldset_sql($sql, [$quizid]);
+        foreach ($overrideids as $overrideid) {
+            $key = "{$quizid}-{$overrideid}";
+            $qscache->delete($key);
+            $ccache->delete($key);
+            $ckcache->delete($key);
+        }
+
+        $cmid = $this->get('cmid');
+        $keycache = self::get_key_cache();
+        $keycache->delete($quizid);
+
+        // Get quiz data.
+        $quizobj = quiz_settings::create($quizid);
+        $quiz = $quizobj->get_quiz();
+
+        // Get our users.
+        $users = get_enrolled_users(
+            context: \context_module::instance($quizobj->get_cm()->id),
+            withcapability: 'mod/quiz:attempt',
+            userfields: 'u.id',
+        );
+
+        foreach ($users as $user) {
+            $key = "{$quizid}-{$user->id}";
+            $keycache->delete($key);
+        }
     }
 
-    /**
-     * Removes cached SEB data.
-     *
-     * @param string $cachekey The ID of of a quiz, or combined with the ID of an override e.g. '12' or '12-1'.
-     */
-    public static function delete_cache($cachekey): void {
+    public static function clear_caches(int $quizid, int $overrideid = 0, bool $clearkeycache = true): void {
+        $cachekey = $overrideid ? "{$quizid}-{$overrideid}" : $quizid;
         self::get_quiz_settings_cache()->delete($cachekey);
         self::get_config_cache()->delete($cachekey);
         self::get_config_key_cache()->delete($cachekey);
+
+        if ($clearkeycache) {
+            $keycache = self::get_key_cache();
+            if ($overrideid) {
+                [$course, $cm] = get_course_and_cm_from_instance($quizid, 'quiz');
+                $users = get_enrolled_users(
+                    context: \context_module::instance($cm->id),
+                    withcapability: 'mod/quiz:attempt',
+                    userfields: 'u.id',
+                );
+
+                foreach ($users as $user) {
+                    $key = "{$quizid}-{$user->id}";
+                    if ($keycache->get($key) === $overrideid) {
+                        $keycache->delete($key);
+                    }
+                }
+            } else {
+                $keycache->delete($quizid);
+            }
+        }
     }
 
     /**
@@ -502,14 +581,26 @@ class seb_quiz_settings extends persistent {
     /**
      * Return key to config cache. Takes override into account.
      *
-     * @param int $quizid Quiz id.
+     * TODO: PHPDOC
+     *
+     * @param int $quizid the quiz ID
      * @return string
      */
-    protected static function get_cache_key($quizid) {
-        if ($override = override_manager::get_quiz_override($quizid)) {
-            return "$quizid-{$override->id}";
+    protected static function get_settings_cache_key(int $quizid) {
+        global $USER;
+        $userid = $USER->id;
+
+        $cache = self::get_key_cache();
+        $settingsid = $cache->get("{$quizid}-{$userid}");
+
+        if ($settingsid === false) {
+            $settings = self::get_record(['quizid' => $quizid]);
+            $override = override_manager::fetch_override_by_user_quiz($userid, $quizid);
+            $settingsid = $override ? (int) $override->id : 0;
+            $cache->set("{$quizid}-{$userid}", $settingsid);
         }
-        return $quizid;
+
+        return $settingsid > 0 ? "{$quizid}-{$settingsid}" : $quizid;
     }
 
     /**

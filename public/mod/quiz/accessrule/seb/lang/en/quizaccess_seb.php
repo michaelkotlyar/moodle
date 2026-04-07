@@ -32,6 +32,7 @@ $string['allowedbrowserkeysdistinct'] = 'The keys must all be different.';
 $string['allowedbrowserkeyssyntax'] = 'A key should be a 64-character hex string.';
 $string['cachedef_config'] = 'SEB config cache';
 $string['cachedef_configkey'] = 'SEB config key cache';
+$string['cachedef_keys'] = 'SEB cache keys';
 $string['cachedef_quizsettings'] = 'SEB quiz settings cache';
 $string['cantdelete'] = 'The template can\'t be deleted as it has been used for one or more quizzes.';
 $string['cantedit'] = 'The template can\'t be edited as it has been used for one or more quizzes.';

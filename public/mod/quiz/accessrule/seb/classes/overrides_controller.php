@@ -16,33 +16,31 @@
 
 namespace quizaccess_seb;
 
-use mod_quiz\local\access_override_rule_base;
-use MoodleQuickForm;
 use context_module;
-use context;
+use mod_quiz\local\access_rule_overrides_controller_base;
+use mod_quiz\form\edit_override_form;
+use MoodleQuickForm;
 
 /**
- * Class override_rule
+ * Class overrides_controller
  *
  * @package    quizaccess_seb
  * @copyright  2025 Michael Kotlyar <michael.kotlyar@catalyst-eu.net>
  * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
-class override_rule extends access_override_rule_base {
+class overrides_controller extends access_rule_overrides_controller_base {
     #[\Override]
-    public static function add_form_fields(
-        context_module $context,
-        int $overrideid,
-        object $quiz,
-        MoodleQuickForm $mform,
-    ): void {
+    public static function add_form_fields(edit_override_form $form): void {
         global $DB;
-        $override = $DB->get_record('quizaccess_seb_override', ['overrideid' => $overrideid]) ?: null;
+        $context = $form->get_context();
+        $override = $form->get_override();
+        $quiz = $form->get_quiz();
+        $mform = $form->get_mform();
         $templateoptions = settings_provider::get_template_options($quiz->cmid);
 
         // Add header element.
         $mform->addElement('header', 'seb', get_string('seb', 'quizaccess_seb'));
-        $mform->setExpanded('seb', $override && $override->enabled);
+        $mform->setExpanded('seb', $override && $override->seb_enabled);
 
         // Enable Safe Exam Browser override.
         $mform->addElement('selectyesno', 'seb_enabled', get_string('enableoverride', 'quizaccess_seb'));
@@ -222,9 +220,10 @@ class override_rule extends access_override_rule_base {
     }
 
     /**
-     * Fetches the best suited default value for a field. If there is an override value set, use this.
-     * If there's no override value, check if the quiz had SEB settings and use this value instead.
-     * Otherwise, use the default value defined.
+     * Fetches the best suited default value for a field.
+     * 
+     * If there is an override value set, use this. If there's no override value, check if the quiz had SEB settings and use this
+     * value instead. Otherwise, use the default value defined.
      *
      * @param string $field The field key to search $default and $override.
      * @param string $default The default form value.
@@ -255,10 +254,11 @@ class override_rule extends access_override_rule_base {
         array $errors,
         array $data,
         array $files,
-        context_module $context,
+        edit_override_form $mform,
     ): array {
+        $context = $mform->get_context();
         $cmid = $context->instanceid;
-        $quizid = get_module_from_cmid($cmid)[0]->id;
+        $quizid = $mform->get_quiz()->id;
 
         if (!settings_provider::can_configure_seb($context)) {
             return $errors;
@@ -365,7 +365,7 @@ class override_rule extends access_override_rule_base {
 
         // Delete cache.
         $quizid = $DB->get_field('quiz_overrides', 'quiz', ['id' => $override['overrideid']]);
-        seb_quiz_settings::delete_cache("$quizid-{$override['overrideid']}");
+        seb_quiz_settings::clear_caches($quizid, $override['overrideid'], false);
     }
 
     #[\Override]
@@ -375,9 +375,8 @@ class override_rule extends access_override_rule_base {
         [$insql, $inparams] = $DB->get_in_or_equal($ids);
         $DB->delete_records_select('quizaccess_seb_override', "id $insql", $inparams);
 
-        foreach ($overrides as $override) {
-            $key = "{$quizid}-{$override->id}";
-            seb_quiz_settings::delete_cache($key);
+        foreach ($ids as $id) {
+            seb_quiz_settings::clear_caches($quizid, $id);
         }
     }
 
@@ -456,7 +455,7 @@ class override_rule extends access_override_rule_base {
     }
 
     #[\Override]
-    public static function add_table_fields(object $override, array $fields, array $values, context $context): array {
+    public static function add_table_fields(\stdClass $override, array $fields, array $values, context_module $context): array {
         if (!empty($override->seb_enabled)) {
             $fields[] = get_string('seb_requiresafeexambrowser', 'quizaccess_seb');
             $values[] = settings_provider::get_requiresafeexambrowser_options($context)[$override->seb_requiresafeexambrowser];

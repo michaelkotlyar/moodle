@@ -140,6 +140,8 @@ class restore_quizaccess_seb_subplugin extends restore_mod_quiz_access_subplugin
     /**
      * Process the restored data for the quizaccess_seb_override table.
      *
+     * TODO: PHPDOC
+     *
      * @param stdClass $data Data for quizaccess_seb_override retrieved from backup xml.
      */
     public function process_quizaccess_seb_override($data) {
@@ -166,6 +168,8 @@ class restore_quizaccess_seb_subplugin extends restore_mod_quiz_access_subplugin
 
     /**
      * Maps the new override IDs to the quizaccess_seb_override entries.
+     *
+     * TODO: PHPDOC
      */
     public function after_restore_quiz() {
         global $DB;

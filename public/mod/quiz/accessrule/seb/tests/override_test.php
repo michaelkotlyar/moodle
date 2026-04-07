@@ -18,6 +18,8 @@ namespace quizaccess_seb;
 
 use mod_quiz_external;
 use mod_quiz\quiz_settings;
+use PHPUnit\Framework\Attributes\CoversClass;
+use PHPUnit\Framework\Attributes\CoversMethod;
 use quizaccess_seb\helper;
 
 defined('MOODLE_INTERNAL') || die();
@@ -33,6 +35,10 @@ require_once($CFG->dirroot . '/mod/quiz/tests/quiz_question_helper_test_trait.ph
  * @copyright  2024 Michael Kotlyar <michael.kotlyar@catalyst-eu.net>
  * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
+#[CoversClass(helper::class)]
+#[CoversMethod(helper::class, 'get_seb_config_content')]
+#[CoversClass(seb_quiz_settings::class)]
+#[CoversMethod(seb_quiz_settings::class, 'get_config_by_quiz_id')]
 final class override_test extends \advanced_testcase {
     use \quizaccess_seb_test_helper_trait;
 
@@ -62,18 +68,9 @@ final class override_test extends \advanced_testcase {
     }
 
     /**
-     * Test we are able to fetch the override settings for the right user.
-     *
-     * In this test, we are performing multiple tasks to make sure they don't disrupt eachother:
-     * - First, we create a quiz with no SEB settings and override one of the users
-     * - Second, we add SEB settings to the quiz
-     * - Third, we then remove the override
-     * - Fourth, we remove the SEB settings
-     *
-     * @covers \quizaccess_seb\helper::get_seb_config_content
-     * @covers \quizaccess_seb\seb_quiz_settings
+     * Test that the correct user gets overridden when accessing a quiz.
      */
-    public function test_override_settings(): void {
+    public function test_override_applies_to_correct_user(): void {
         [$course, $user, $overrideuser] = $this->setup_test_course();
         $users = [$user, $overrideuser];
 
@@ -89,19 +86,26 @@ final class override_test extends \advanced_testcase {
         $config = helper::get_seb_config_content($this->quiz->cmid);
         $this->assertNotEmpty($config);
 
-        // Confirm there are no SEB settings for user.
+        // Check there are no SEB settings for non-overridden user.
         $this->setUser($user);
-        $raised = false;
-        try {
-            helper::get_seb_config_content($this->quiz->cmid);
-        } catch (\moodle_exception $e) {
-            $raised = true;
-            $this->assertMatchesRegularExpression(
-                '@' . 'No SEB config could be found for quiz with cmid: ' . $this->quiz->cmid . '@',
-                $e->getMessage()
-            );
-        }
-        $this->assertTrue($raised);
+        $this->expectException(\moodle_exception::class);
+        $this->expectExceptionMessageMatches('@' . 'No SEB config could be found for quiz with cmid: ' . $this->quiz->cmid . '@');
+        helper::get_seb_config_content($this->quiz->cmid);
+    }
+
+    /**
+     * Test overridden settings apply to user over base SEB settings.
+     */
+    public function test_override_applies_to_correct_user_over_base_seb_config(): void {
+        [$course, $user, $overrideuser] = $this->setup_test_course();
+        $users = [$user, $overrideuser];
+
+        // Create a quiz with no SEB access rules.
+        $this->quiz = $this->create_test_quiz($course);
+
+        // Create an override for overrideuser.
+        $this->setAdminUser();
+        $overrideid = $this->save_override($overrideuser);
 
         // Add SEB settings to quiz.
         $settings = $this->get_test_settings([
@@ -119,27 +123,43 @@ final class override_test extends \advanced_testcase {
             $this->assertNotEmpty($config);
             $configs[] = $config;
         }
+        $this->setUser($overrideuser);
+        $config = helper::get_seb_config_content($this->quiz->cmid);
 
-        // Check that settings are equal (override settings are the same).
+        // Check that settings are equal (both SEB settings should be identical as they are default).
+        $this->setAdminUser();
         $this->assertEquals($configs[0], $configs[1]);
 
-        // Change the override settings, check override now differs from original settings.
-        quiz_settings::create($this->quiz->id)
-            ->get_override_manager()
-            ->delete_overrides_by_id([$overrideid]);
+        // Change the override settings, check override now differs from base settings.
+        $manager = quiz_settings::create($this->quiz->id)->get_override_manager();
+        $this->save_override($overrideuser, ['id' => $overrideid, 'seb_showreloadbutton' => 0]);
+
+        $newconfigs = [];
+        foreach ($users as $user) {
+            $this->setUser($user);
+            $config = helper::get_seb_config_content($this->quiz->cmid);
+            $this->assertNotEmpty($config);
+            $newconfigs[] = $config;
+        }
+
+        $this->assertNotEquals($newconfigs[0], $newconfigs[1]);
+    }
+
+    /**
+     * Test override no longer applies when removed.
+     */
+    public function test_override_no_longer_applies_when_removed(): void {
+        [$course, $user, $overrideuser] = $this->setup_test_course();
+        $users = [$user, $overrideuser];
+
+        // Create a quiz with default manual SEB access rule.
+        $this->quiz = $this->create_test_quiz($course, settings_provider::USE_SEB_CONFIG_MANUALLY);
+
+        // Create an override for overrideuser.
+        $this->setAdminUser();
         $overrideid = $this->save_override($overrideuser, ['seb_showwificontrol' => 1]);
-        $this->setUser($user);
-        $config = helper::get_seb_config_content($this->quiz->cmid);
-        $this->assertNotEmpty($config);
-        $configs[1] = $config;
-        $this->assertNotEquals($configs[0], $configs[1]);
 
-        // Remove override from override user.
-        quiz_settings::create($this->quiz->id)
-            ->get_override_manager()
-            ->delete_overrides_by_id([$overrideid]);
-
-        // Check both users have settings.
+        // Check override user uses overridden settings rather than base SEB settings.
         $configs = [];
         foreach ($users as $user) {
             $this->setUser($user);
@@ -147,34 +167,73 @@ final class override_test extends \advanced_testcase {
             $this->assertNotEmpty($config);
             $configs[] = $config;
         }
+        $this->assertNotEquals($configs[0], $configs[1]);
 
-        // Check that settings are now equal (non-overridden settings).
+        // Remove override from override user.
+        quiz_settings::create($this->quiz->id)
+            ->get_override_manager()
+            ->delete_overrides_by_id([$overrideid]);
+
+        // Check override user now uses base SEB settings.
+        $configs = [];
+        foreach ($users as $user) {
+            $this->setUser($user);
+            $config = helper::get_seb_config_content($this->quiz->cmid);
+            $this->assertNotEmpty($config);
+            $configs[] = $config;
+        }
         $this->assertEquals($configs[0], $configs[1]);
+    }
 
-        // Remove settings.
-        $quizsettings->delete($this->quiz->id);
+    /**
+     * Test that there are no base and override SEB settings after removal.
+     */
+    public function test_override_and_non_override_no_longer_applies_when_removed(): void {
+        [$course, $user, $overrideuser] = $this->setup_test_course();
+        $users = [$user, $overrideuser];
+
+        // Create a quiz with manual default SEB access rules.
+        $this->quiz = $this->create_test_quiz($course);
+        $settings = $this->get_test_settings([
+            'quizid' => $this->quiz->id,
+            'cmid' => $this->quiz->cmid,
+        ]);
+        $quizsettings = new seb_quiz_settings(0, $settings);
+        $quizsettings->save();
+
+        // Create an SEB override for overrideuser.
+        $this->setAdminUser();
+        $overrideid = $this->save_override($overrideuser, ['seb_showwificontrol' => 1]);
+
+        // Check configs are applied and are different.
+        $configs = [];
+        foreach ($users as $user) {
+            $this->setUser($user);
+            $config = helper::get_seb_config_content($this->quiz->cmid);
+            $this->assertNotEmpty($config);
+            $configs[] = $config;
+        }
+        $this->assertNotEquals($configs[0], $configs[1]);
+
+        // Delete base settings and override.
+        $del = $quizsettings->delete();
+        quiz_settings::create($this->quiz->id)
+            ->get_override_manager()
+            ->delete_overrides_by_id([$overrideid]);
 
         // Check both users no longer have SEB settings.
         foreach ($users as $user) {
             $this->setUser($user);
-            $raised = false;
-            try {
-                helper::get_seb_config_content($this->quiz->cmid);
-            } catch (\moodle_exception $e) {
-                $raised = true;
-                $this->assertMatchesRegularExpression(
-                    '@' . 'No SEB config could be found for quiz with cmid: ' . $this->quiz->cmid . '@',
-                    $e->getMessage()
-                );
-            }
-            $this->assertTrue($raised);
+            $this->expectException(\moodle_exception::class);
+            $this->expectExceptionMessageMatches(
+                '@' . 'No SEB config could be found for quiz with cmid: ' . $this->quiz->cmid . '@',
+            );
+            $config = helper::get_seb_config_content($this->quiz->cmid);
         }
     }
 
     /**
      * Test quiz override for SEB, checking the SEB values retrieved are correct.
-     *
-     * @covers \quizaccess_seb\seb_quiz_settings
      */
     public function test_override_settings_values(): void {
         [$course, $user, $overrideuser] = $this->setup_test_course();
@@ -268,12 +327,16 @@ final class override_test extends \advanced_testcase {
     /**
      * Test quiz override settings for SEB are correctly cached.
      *
-     * @covers \quizaccess_seb\seb_quiz_settings
+     * Requires some repetition to utlilise and check the cache.
      */
     public function test_override_cache(): void {
         [$course, $user, $overrideuser] = $this->setup_test_course();
         $this->quiz = $this->create_test_quiz($course);
-        $settings = $this->get_test_settings(['quizid' => $this->quiz->id, 'muteonstartup' => '1']);
+        $settings = $this->get_test_settings([
+            'quizid' => $this->quiz->id,
+            'cmid' => $this->quiz->cmid,
+            'muteonstartup' => '1',
+        ]);
         $quizsettings = new seb_quiz_settings(0, $settings);
         $quizsettings->save();
         $sebconfigcache = \cache::make('quizaccess_seb', 'config');
@@ -318,6 +381,7 @@ final class override_test extends \advanced_testcase {
 
         // Delete original settings.
         $this->setAdminUser();
+        $quizsettings = seb_quiz_settings::get_by_quiz_id($this->quiz->id);
         $quizsettings->delete();
 
         // Test cached settings are gone and cached override settings are unaffected.
@@ -363,10 +427,7 @@ final class override_test extends \advanced_testcase {
     }
 
     /**
-     * Test get_quiz_access_information with override
-     *
-     * @covers \mod_quiz_external::get_quiz_access_information
-     * @covers \quizaccess_seb::description
+     * Test overridden settings are correctly fetched with external function mod_quiz_external::get_quiz_access_information.
      */
     public function test_get_quiz_access_information_with_override(): void {
         // Create a new quiz.
@@ -374,7 +435,11 @@ final class override_test extends \advanced_testcase {
         $this->quiz = $this->create_test_quiz($course);
 
         // Add SEB access rule.
-        $settings = $this->get_test_settings(['quizid' => $this->quiz->id, 'muteonstartup' => '1']);
+        $settings = $this->get_test_settings([
+            'quizid' => $this->quiz->id,
+            'cmid' => $this->quiz->cmid,
+            'muteonstartup' => '1',
+        ]);
         $quizsettings = new seb_quiz_settings(0, $settings);
         $quizsettings->save();
 

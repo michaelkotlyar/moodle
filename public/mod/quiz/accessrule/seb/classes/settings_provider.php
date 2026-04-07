@@ -563,6 +563,8 @@ class settings_provider {
     /**
      * Returns a list of all options of SEB usage.
      *
+     * TODO: PHPDOC
+     *
      * @param \context $context Context used with capability checking selection options.
      * @return array
      */
@@ -842,6 +844,8 @@ class settings_provider {
     /**
      * Check if the current user can set "Do not require SEB" setting.
      *
+     * TODO: PHPDOC
+     *
      * @param \context $context Context to check access in.
      * @return bool
      */
@@ -851,6 +855,8 @@ class settings_provider {
 
     /**
      * Check if the current user can set "Do not require SEB" setting in the override menu.
+     *
+     * TODO: PHPDOC
      *
      * @param \context $context Context to check access in.
      * @return bool
