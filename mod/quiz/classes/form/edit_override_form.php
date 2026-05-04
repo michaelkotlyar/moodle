@@ -108,7 +108,7 @@ class edit_override_form extends moodleform {
             } else {
                 // Prepare the list of groups.
                 // Only include the groups the current can access.
-                $groups = $accessallgroups ? groups_get_all_groups($cm->course) : groups_get_activity_allowed_groups($cm);
+                $groups = groups_get_user_visible_groups($cm, 'g.id, g.name');
                 if (empty($groups)) {
                     // Generate an error.
                     $link = new moodle_url('/mod/quiz/overrides.php', ['cmid' => $cm->id]);
@@ -117,9 +117,7 @@ class edit_override_form extends moodleform {
 
                 $groupchoices = [];
                 foreach ($groups as $group) {
-                    if ($group->visibility != GROUPS_VISIBILITY_NONE) {
-                        $groupchoices[$group->id] = format_string($group->name, true, ['context' => $this->context]);
-                    }
+                    $groupchoices[$group->id] = format_string($group->name, true, ['context' => $this->context]);
                 }
                 unset($groups);
 

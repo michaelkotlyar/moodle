@@ -250,7 +250,7 @@ function quiz_update_effective_access($quiz, $userid) {
     }
 
     // Check for group overrides.
-    $groupings = groups_get_user_groups($quiz->course, $userid);
+    $groupings = groups_get_user_groups($quiz->course, $userid, true);
 
     if (!empty($groupings[0])) {
         // Select all overrides that apply to the User's groups.

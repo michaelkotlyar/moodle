@@ -25,6 +25,7 @@ defined('MOODLE_INTERNAL') || die();
 
 global $CFG;
 require_once($CFG->dirroot . '/mod/quiz/locallib.php');
+require_once($CFG->dirroot . '/mod/quiz/tests/quiz_question_helper_test_trait.php');
 
 /**
  * Unit tests for the quiz class
@@ -34,7 +35,9 @@ require_once($CFG->dirroot . '/mod/quiz/locallib.php');
  * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  * @covers \mod_quiz\quiz_settings
  */
-final class quizobj_test extends basic_testcase {
+final class quizobj_test extends \advanced_testcase {
+    use \quiz_question_helper_test_trait;
+
     /**
      * Test cases for {@see test_cannot_review_message()}.
      *
@@ -126,5 +129,96 @@ final class quizobj_test extends basic_testcase {
         // Test.
         $this->assertEquals($expectation,
             $quizobj->cannot_review_message($attemptstate, false, $submittime));
+    }
+
+    /**
+     * Create and apply a quiz override for a hidden group.
+     */
+    public function test_create_and_retrieve_group_override(): void {
+        $this->setAdminUser();
+        $this->resetAfterTest();
+        $generator = $this->getDataGenerator();
+
+        // Create course, quiz, users and 2 groups (one hidden, one visible) - enrol user to course and group.
+        $course = $generator->create_course();
+        $quiz = $this->create_test_quiz($course);
+        $groupids = [
+            'hidden' => groups_create_group((object) [
+                'courseid' => $course->id,
+                'name' => 'Hidden Group',
+                'visibility' => GROUPS_VISIBILITY_NONE,
+            ]),
+            'visible' => groups_create_group((object) [
+                'courseid' => $course->id,
+                'name' => 'Visible Group',
+                'visibility' => GROUPS_VISIBILITY_ALL,
+            ]),
+        ];
+
+        // Create 5 users to be added to the groups.
+        $users = [
+            $generator->create_and_enrol($course, 'student'),
+            $generator->create_and_enrol($course, 'student'),
+            $generator->create_and_enrol($course, 'student'),
+            $generator->create_and_enrol($course, 'student'),
+            $generator->create_and_enrol($course, 'student'),
+        ];
+
+        // Add the first two users to the visible group.
+        $generator->create_group_member(['groupid' => $groupids['visible'], 'userid' => $users[0]->id]);
+        $generator->create_group_member(['groupid' => $groupids['visible'], 'userid' => $users[1]->id]);
+
+        // And the last two to the hidden group.
+        $generator->create_group_member(['groupid' => $groupids['hidden'], 'userid' => $users[2]->id]);
+        $generator->create_group_member(['groupid' => $groupids['hidden'], 'userid' => $users[3]->id]);
+
+        // The last user is not in a group.
+
+        // Add a quiz override to the visible group.
+        $quizobj = quiz_settings::create($quiz->id);
+        $overridedata = [
+            'quiz' => $quiz->id,
+            'groupid' => $groupids['visible'],
+            'password' => 'owl',
+        ];
+        $manager = $quizobj->get_override_manager();
+        $manager->save_override($overridedata);
+
+        // Confirm that one override exists in the database for this quiz and it's for the visible group.
+        $overrides = $manager->get_all_overrides();
+        $this->assertCount(1, $overrides);
+        $this->assertEquals($groupids['visible'], reset($overrides)->groupid);
+
+        // Confirm that for a user in the visible group there is a password rule.
+        $quizobjuser0 = quiz_settings::create($quiz->id, $users[0]->id);
+        $this->assertEquals('owl', $quizobjuser0->get_quiz()->password);
+
+        // And confirm that for a user not in the visible group, there is not a password rule.
+        $quizobjuser2 = quiz_settings::create($quiz->id, $users[2]->id);
+        $this->assertEquals('', $quizobjuser2->get_quiz()->password);
+
+        // Now add an override to the hidden group as well with a different password.
+        $overridedata = [
+            'quiz' => $quiz->id,
+            'groupid' => $groupids['hidden'],
+            'password' => 'fox',
+        ];
+        $manager->save_override($overridedata);
+
+        // Confirm that there are now 2 override records for this quiz.
+        $overrides = $manager->get_all_overrides();
+        $this->assertCount(2, $overrides);
+
+        // Confirm still that a user in the visible group has an override password of 'owl'.
+        $quizobjuser1 = quiz_settings::create($quiz->id, $users[1]->id);
+        $this->assertEquals('owl', $quizobjuser1->get_quiz()->password);
+
+        // And that a user in the hidden group has an override password of 'fox'.
+        $quizobjuser3 = quiz_settings::create($quiz->id, $users[3]->id);
+        $this->assertEquals('fox', $quizobjuser3->get_quiz()->password);
+
+        // Finally, confirm that the user not in any groups has no password.
+        $quizobjuser4 = quiz_settings::create($quiz->id, $users[4]->id);
+        $this->assertEquals('', $quizobjuser4->get_quiz()->password);
     }
 }
