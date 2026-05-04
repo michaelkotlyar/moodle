@@ -29,6 +29,8 @@ require_once(__DIR__ . '/../../config.php');
 require_once($CFG->dirroot.'/mod/quiz/lib.php');
 require_once($CFG->dirroot.'/mod/quiz/locallib.php');
 
+global $DB, $PAGE, $USER;
+
 $cmid = optional_param('cmid', 0, PARAM_INT);
 $overrideid = optional_param('id', 0, PARAM_INT);
 $action = optional_param('action', null, PARAM_ALPHA);
@@ -106,6 +108,17 @@ if ($action === 'duplicate') {
 
 // True if group-based override.
 $groupmode = !empty($data->groupid) || ($action === 'addgroup' && empty($overrideid));
+
+// Check user can view groupmode override if group is hidden.
+if ($groupmode && !empty($data->groupid)) {
+    $group = groups_get_group($data->groupid, 'id, visibility', MUST_EXIST);
+    if ((int) $group->visibility === GROUPS_VISIBILITY_NONE) {
+        $groupids = groups_get_user_visible_groups($cm, 'g.id') ?? [];
+        if (!in_array($group->id, $groupids)) {
+            throw new \moodle_exception('invalidoverrideid', 'quiz');
+        }
+    }
+}
 
 $overridelisturl = new moodle_url('/mod/quiz/overrides.php', ['cmid' => $cm->id]);
 if (!$groupmode) {

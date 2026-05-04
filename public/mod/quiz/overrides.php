@@ -28,6 +28,8 @@ require_once(__DIR__ . '/../../config.php');
 require_once($CFG->dirroot.'/mod/quiz/lib.php');
 require_once($CFG->dirroot.'/mod/quiz/locallib.php');
 
+global $DB, $PAGE, $USER;
+
 $cmid = required_param('cmid', PARAM_INT);
 $mode = optional_param('mode', '', PARAM_ALPHA); // One of 'user' or 'group', default is 'group'.
 
@@ -49,11 +51,11 @@ $quizgroupmode = groups_get_activity_groupmode($cm);
 $showallgroups = ($quizgroupmode == NOGROUPS) || has_capability('moodle/site:accessallgroups', $context);
 
 // Get the course groups that the current user can access.
-$groups = $showallgroups ? groups_get_all_groups($cm->course) : groups_get_activity_allowed_groups($cm);
+$groupids = groups_get_user_visible_groups($cm, 'g.id') ?? [];
 
 // Default mode is "group", unless there are no groups.
 if ($mode != "user" and $mode != "group") {
-    if (!empty($groups)) {
+    if (!empty($groupids)) {
         $mode = "group";
     } else {
         $mode = "user";
@@ -96,12 +98,12 @@ $headers = [];
 if ($groupmode) {
     $headers[] = get_string('group');
     // To filter the result by the list of groups that the current user has access to.
-    if ($groups) {
+    if ($groupids) {
         $params = ['quizid' => $quiz->id];
-        list($insql, $inparams) = $DB->get_in_or_equal(array_keys($groups), SQL_PARAMS_NAMED);
+        [$insql, $inparams] = $DB->get_in_or_equal($groupids, SQL_PARAMS_NAMED);
         $params += $inparams;
 
-        $sql = "SELECT o.*, g.name
+        $sql = "SELECT o.*, g.name, g.visibility
                   FROM {quiz_overrides} o
                   JOIN {groups} g ON o.groupid = g.id
                  WHERE o.quiz = :quizid AND g.id $insql
@@ -129,8 +131,8 @@ if ($groupmode) {
         $groupsjoin = '';
         $groupswhere = '';
 
-    } else if ($groups) {
-        list($insql, $inparams) = $DB->get_in_or_equal(array_keys($groups), SQL_PARAMS_NAMED);
+    } else if ($groupids) {
+        [$insql, $inparams] = $DB->get_in_or_equal($groupids, SQL_PARAMS_NAMED);
         $groupsjoin = 'JOIN {groups_members} gm ON u.id = gm.userid';
         $groupswhere = ' AND gm.groupid ' . $insql;
         $params += $inparams;
@@ -176,6 +178,7 @@ $overridedeleteurl = new moodle_url('/mod/quiz/overridedelete.php');
 $overrideediturl = new moodle_url('/mod/quiz/overrideedit.php');
 
 $hasinactive = false; // Whether there are any inactive overrides.
+$canviewallgroups = has_capability('moodle/course:viewhiddengroups', $context);
 
 foreach ($overrides as $override) {
 
@@ -323,7 +326,7 @@ $addenabled = true;
 $warningmessage = '';
 if ($canedit) {
     if ($groupmode) {
-        if (empty($groups)) {
+        if (empty($groupids)) {
             // There are no groups.
             $warningmessage = get_string('groupsnone', 'quiz');
             $addenabled = false;
@@ -333,8 +336,8 @@ if ($canedit) {
         if ($showallgroups) {
             $users = get_users_by_capability($context, 'mod/quiz:attempt', 'u.id');
             $nousermessage = get_string('usersnone', 'quiz');
-        } else if ($groups) {
-            $users = get_users_by_capability($context, 'mod/quiz:attempt', 'u.id', '', '', '', array_keys($groups));
+        } else if ($groupids) {
+            $users = get_users_by_capability($context, 'mod/quiz:attempt', 'u.id', '', '', '', $groupids);
             $nousermessage = get_string('usersnone', 'quiz');
         } else {
             $users = [];

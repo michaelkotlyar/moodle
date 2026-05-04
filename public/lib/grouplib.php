@@ -1712,3 +1712,94 @@ function groups_get_activity_shared_group_members($cm, $userid = null) {
     }
     return groups_get_groups_members($groupsids);
 }
+
+/**
+ * Fetch the list of groups visible to the current user in the course module.
+ *
+ * Permissions and group mode are taken into account when fetching the groups.
+ *
+ * NOGROUPS - all groups are visible if the user has permission to view hidden groups, otherwise the user can see visible groups,
+ * even ones they aren't a member of.
+ *
+ * SEPARATEGROUPS - the user can only see groups they are a member of, unless they have the 'moodle/site:accessallgroups'
+ * capability. And if the user has permission to view hidden groups, then they can also see hidden groups.
+ *
+ * VISIBLEGROUPS - the user can see groups whether they are a member of them or not, but hidden groups are only visible to users
+ * with the permission to view hidden groups.
+ *
+ * @param cm_info|stdClass $cm course module or course object.
+ * @param string $fields Fields to return, defaults to 'g.*'. Must include 'g.id' field if not using default.
+ * @return ?array $groups Fetch list of visible group objects in the course. If $fields is 'g.id', returns list of group ids.
+ */
+function groups_get_user_visible_groups(cm_info|stdClass $cm, string $fields = 'g.*'): ?array {
+    global $DB, $USER;
+
+    // Starting DB query components to fetch groups.
+    $joins = '';
+    $where = '';
+    $params = ['courseid' => $cm->course];
+
+    // Fetch permissions for the user relevant to group visibility.
+    $showhiddengroups = \core_group\visibility::can_view_all_groups($cm->course);
+    $shownonmembergroups = has_capability('moodle/site:accessallgroups', \context_module::instance($cm->id));
+
+    // Fetch group mode and determine which groups to show based on permissions and group mode.
+    $groupmode = (int) groups_get_activity_groupmode($cm);
+    $showallgroups = match ($groupmode) {
+        NOGROUPS => $showhiddengroups,
+        SEPARATEGROUPS => $showhiddengroups && $shownonmembergroups,
+        VISIBLEGROUPS => $showhiddengroups || $shownonmembergroups,
+    };
+
+    if (!$showallgroups) {
+        // If conditions insufficient, narrow down query to show only groups the user has access to.
+        [$visibilitywhere, $visibilityparams] = \core_group\visibility::sql_group_visibility_where($USER->id);
+        $joins = "LEFT JOIN {groups_members} gm ON gm.groupid = g.id AND gm.userid = :userid";
+        $params = array_merge(['userid' => $USER->id], $params);
+
+        if ($showhiddengroups) {
+            // Show hidden groups.
+            $where = "gm.id IS NOT NULL AND ";
+            if ($groupmode === NOGROUPS) {
+                // Show non-member groups too if in non-group mode, exclude hidden groups the user is not a member of.
+                $where = "NOT g.visibility = :none";
+                $params = array_merge($params, ['none' => GROUPS_VISIBILITY_NONE]);
+            }
+        } else if ($shownonmembergroups) {
+            // User has permission to access groups, but not to view hidden groups.
+            $where = "gm.id IS NOT NULL OR (gm.id IS NULL AND $visibilitywhere) AND ";
+            $params = array_merge($params, $visibilityparams);
+        } else if ($groupmode === NOGROUPS) {
+            // If in NOGROUPS mode, show visible groups and groups the user is a member of, except non-member hidden groups.
+            $where = "(gm.id IS NOT NULL and NOT g.visibility = :none)
+                OR (gm.id IS NULL AND (g.visibility = :all OR g.visibility = :members))
+                AND ";
+            $params = array_merge(
+                $params,
+                ['none' => GROUPS_VISIBILITY_NONE, 'all' => GROUPS_VISIBILITY_ALL, 'members' => GROUPS_VISIBILITY_MEMBERS],
+            );
+        } else if ($groupmode === VISIBLEGROUPS) {
+            // If in VISIBLEGROUPS mode, show visible groups as well as groups user is member of.
+            $where = "(gm.id IS NOT NULL and NOT g.visibility = :none) OR (gm.id IS NULL AND g.visibility = :all) AND ";
+            $params = array_merge($params, ['none' => GROUPS_VISIBILITY_NONE, 'all' => GROUPS_VISIBILITY_ALL]);
+        } else {
+            // Show only member groups.
+            $joins = "JOIN {groups_members} gm ON gm.groupid = g.id AND gm.userid = :userid";
+            $where = $visibilitywhere . ' AND ';
+            $params = array_merge(['userid' => $USER->id], $visibilityparams, $params);
+        }
+    }
+
+    // Finish setting up the query.
+    $where .= 'g.courseid = :courseid';
+    $sql = "SELECT {$fields} FROM {groups} g {$joins} WHERE {$where} ORDER BY g.name ASC";
+
+    // Fetch the groups. If only ids are requested, return a list of ids rather than a list of group objects.
+    if ($fields === 'g.id') {
+        $groups = $DB->get_fieldset_sql($sql, $params);
+    } else {
+        $groups = $DB->get_records_sql($sql, $params);
+    }
+
+    return $groups ?? null;
+}
