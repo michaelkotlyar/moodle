@@ -732,33 +732,44 @@ function quiz_override_summary(stdClass $quiz, cm_info|stdClass $cm, int $curren
     $accessallgroups = ($quizgroupmode == NOGROUPS) ||
             has_capability('moodle/site:accessallgroups', context_module::instance($cm->id));
 
+    $groupids = groups_get_user_visible_groups($cm, 'g.id') ?? [];
+
     if ($accessallgroups) {
-        // User can see all groups.
-        $groupcount = $DB->count_records_select('quiz_overrides',
-                'quiz = ? AND groupid IS NOT NULL', [$quiz->id]);
-        $usercount = $DB->count_records_select('quiz_overrides',
-                'quiz = ? AND userid IS NOT NULL', [$quiz->id]);
+        $groupsql = "quiz = ? AND groupid IS NOT NULL";
+        $groupparams = [$quiz->id];
+
+        if ($groupids) {
+            [$insql, $inparams] = $DB->get_in_or_equal($groupids);
+            $groupsql .= " AND groupid {$insql}";
+            $groupparams = array_merge($groupparams, $inparams);
+        }
+
+        $groupcount = $DB->count_records_select('quiz_overrides', $groupsql, $groupparams);
+        $usercount = $DB->count_records_select(
+            'quiz_overrides',
+            'quiz = ? AND userid IS NOT NULL',
+            [$quiz->id],
+        );
         return ['group' => $groupcount, 'user' => $usercount, 'mode' => 'allgroups'];
 
     } else {
         // User can only see groups they are in.
-        $groups = groups_get_activity_allowed_groups($cm);
-        if (!$groups) {
+        if (!$groupids) {
             return ['group' => 0, 'user' => 0, 'mode' => 'somegroups'];
         }
 
-        list($groupidtest, $params) = $DB->get_in_or_equal(array_keys($groups));
+        [$insql, $params] = $DB->get_in_or_equal($groupids);
         $params[] = $quiz->id;
 
-        $groupcount = $DB->count_records_select('quiz_overrides',
-                "groupid $groupidtest AND quiz = ?", $params);
-        $usercount = $DB->count_records_sql("
-                SELECT COUNT(1)
-                  FROM {quiz_overrides} o
-                  JOIN {groups_members} gm ON o.userid = gm.userid
-                 WHERE gm.groupid $groupidtest
-                   AND o.quiz = ?
-               ", $params);
+        $groupcount = $DB->count_records_select('quiz_overrides', "groupid $insql AND quiz = ?", $params);
+        $usercount = $DB->count_records_sql(
+            "SELECT COUNT(1)
+               FROM {quiz_overrides} o
+               JOIN {groups_members} gm ON o.userid = gm.userid
+              WHERE gm.groupid $insql
+                AND o.quiz = ?",
+            $params,
+        );
 
         return ['group' => $groupcount, 'user' => $usercount, 'mode' => 'somegroups'];
     }
