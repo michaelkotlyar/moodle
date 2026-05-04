@@ -26,6 +26,7 @@ use core_group\visibility;
  * @author     Andrew Nicols
  * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
+#[\PHPUnit\Framework\Attributes\CoversFunction('groups_get_user_visible_groups')]
 final class grouplib_test extends \advanced_testcase {
 
     public function test_groups_get_group_by_idnumber(): void {
@@ -2440,5 +2441,279 @@ final class grouplib_test extends \advanced_testcase {
         $this->assertNotContains((int)$groups['own']->id, array_keys($activitygroups));
         $this->assertNotContains((int)$groups['none']->id, array_keys($activitygroups));
 
+    }
+
+    /**
+     * Test fetching user visible groups.
+     *
+     * @covers \groups_get_user_visible_groups()
+     * @throws \coding_exception
+     */
+    public function test_groups_get_user_visible_groups(): void {
+        [$users, $groups, $course] = $this->create_groups_with_visibilty();
+
+        // Assign users to groups.
+        $generator = $this->getDataGenerator();
+        $generator->create_group_member(['groupid' => $groups['all']->id, 'userid' => $users[1]->id]);
+        $generator->create_group_member(['groupid' => $groups['members']->id, 'userid' => $users[1]->id]);
+        $generator->create_group_member(['groupid' => $groups['members']->id, 'userid' => $users[2]->id]);
+        $generator->create_group_member(['groupid' => $groups['own']->id, 'userid' => $users[1]->id]);
+        $generator->create_group_member(['groupid' => $groups['own']->id, 'userid' => $users[3]->id]);
+        $generator->create_group_member(['groupid' => $groups['none']->id, 'userid' => $users[4]->id]);
+
+        $quiz = $generator->create_module('quiz', ['course' => $course->id]);
+        $cm = get_fast_modinfo($course)->get_cm($quiz->cmid);
+
+        $this->setUser($users[1]);
+        $groups1 = groups_get_user_visible_groups($cm);
+        // User1 is in groups all, members and own, and can see them.
+        $this->assertArrayHasKey($groups['all']->id, $groups1);
+        $this->assertArrayHasKey($groups['members']->id, $groups1);
+        $this->assertArrayHasKey($groups['own']->id, $groups1);
+        $this->assertArrayNotHasKey($groups['none']->id, $groups1);
+
+        $this->setUser($users[2]);
+        $groups2 = groups_get_user_visible_groups($cm);
+        // User2 is in group members, and can see group all as well.
+        $this->assertArrayHasKey($groups['all']->id, $groups2);
+        $this->assertArrayHasKey($groups['members']->id, $groups2);
+        $this->assertArrayNotHasKey($groups['own']->id, $groups2);
+        $this->assertArrayNotHasKey($groups['none']->id, $groups2);
+
+        $this->setUser($users[3]);
+        $groups3 = groups_get_user_visible_groups($cm);
+        // User3 is in group own, and can see group all as well.
+        $this->assertArrayHasKey($groups['all']->id, $groups3);
+        $this->assertArrayNotHasKey($groups['members']->id, $groups3);
+        $this->assertArrayHasKey($groups['own']->id, $groups3);
+        $this->assertArrayNotHasKey($groups['none']->id, $groups3);
+
+        $this->setUser($users[4]);
+        $groups4 = groups_get_user_visible_groups($cm);
+        // User4 can see group all and its members. They are in group none but cannot see it.
+        $this->assertArrayHasKey($groups['all']->id, $groups4);
+        $this->assertArrayNotHasKey($groups['members']->id, $groups4);
+        $this->assertArrayNotHasKey($groups['own']->id, $groups4);
+        $this->assertArrayNotHasKey($groups['none']->id, $groups4);
+
+        $this->setUser($users[5]);
+        $groups5 = groups_get_user_visible_groups($cm);
+        // User5 is has viewallgroups, so can see all groups.
+        $this->assertArrayHasKey($groups['all']->id, $groups5);
+        $this->assertArrayHasKey($groups['members']->id, $groups5);
+        $this->assertArrayHasKey($groups['own']->id, $groups5);
+        $this->assertArrayHasKey($groups['none']->id, $groups5);
+    }
+
+    /**
+     * Test fetching user visible groups.
+     *
+     * Test if the groups_get_user_visible_groups function fetches the correct groups based on what permissions the user has and
+     * the quiz groupmode. The test function uses {@see self::provider_permissions_and_groupmodes()} data provider to test how the
+     * user fetches the groups in 12 different combinations of permissions and quiz groupmodes.
+     *
+     * @param int $accessallgroupscapability Set the 'moodle/site:accessallgroups' capability - CAP_ALLOW or CAP_PREVENT
+     * @param int $viewhiddengroupscapability Set the 'moodle/course:viewhiddengroups' capability - CAP_ALLOW or CAP_PREVENT
+     * @param int $groupmode Groupmode to set the quiz as - NOGROUPS, SEPARATEGROUPS or VISIBLEGROUPS
+     * @param bool $canseeall Assert if the teach should or shouldn't be able to see 'all' visibility type groups
+     * @param bool $canseemembers Assert if the teach should or shouldn't be able to see 'members' visibility type groups
+     * @param bool $canseeown Assert if the teach should or shouldn't be able to see 'own' visibility type groups
+     * @param bool $canseenone Assert if the teach should or shouldn't be able to see hidden groups
+     */
+    #[\PHPUnit\Framework\Attributes\DataProvider('provider_permissions_and_groupmodes')]
+    public function test_groups_get_user_visible_groups_with_differing_permissions_and_groupmodes(
+        int $accessallgroupscapability,
+        int $viewhiddengroupscapability,
+        int $groupmode,
+        bool $canseeall,
+        bool $canseemembers,
+        bool $canseeown,
+        bool $canseenone,
+    ): void {
+        global $DB;
+        [$users, $groups, $course] = $this->create_groups_with_visibilty();
+
+        // Assign users to groups.
+        $generator = $this->getDataGenerator();
+        $generator->create_group_member(['groupid' => $groups['all']->id, 'userid' => $users[1]->id]);
+        $generator->create_group_member(['groupid' => $groups['members']->id, 'userid' => $users[1]->id]);
+        $generator->create_group_member(['groupid' => $groups['members']->id, 'userid' => $users[2]->id]);
+        $generator->create_group_member(['groupid' => $groups['own']->id, 'userid' => $users[1]->id]);
+        $generator->create_group_member(['groupid' => $groups['own']->id, 'userid' => $users[3]->id]);
+        $generator->create_group_member(['groupid' => $groups['none']->id, 'userid' => $users[4]->id]);
+
+        // Get course/module/quiz info.
+        $coursecontext = \context_course::instance($course->id);
+        $quiz = $generator->create_module('quiz', ['course' => $course->id]);
+        $cm = get_fast_modinfo($course)->get_cm($quiz->cmid);
+
+        // Set groupmode for quiz.
+        \core_courseformat\formatactions::cm($quiz->course)->set_groupmode($quiz->cmid, $groupmode);
+
+        // Edit permisisons for editingteacher.
+        $editingteacherid = $DB->get_field('role', 'id', ['shortname' => 'editingteacher']);
+        assign_capability('moodle/site:accessallgroups', $accessallgroupscapability, $editingteacherid, $coursecontext->id, true);
+        assign_capability(
+            'moodle/course:viewhiddengroups',
+            $viewhiddengroupscapability,
+            $editingteacherid,
+            $coursecontext->id,
+            true,
+        );
+
+        // Assign user 5 as editing teacher.
+        $generator->role_assign($editingteacherid, $users[5]->id, \context_system::instance());
+
+        // Test teacher can or can't see certain groups based on its' visibility.
+        $this->setUser($users[5]);
+        $visiblegroups = groups_get_user_visible_groups($cm);
+
+        $this->assertEquals(
+            $canseeall,
+            isset($visiblegroups[$groups['all']->id]),
+            'Unexpected result viewing "all" visibililty group',
+        );
+        $this->assertEquals(
+            $canseemembers,
+            isset($visiblegroups[$groups['members']->id]),
+            'Unexpected result viewing "members" visibililty group',
+        );
+        $this->assertEquals(
+            $canseeown,
+            isset($visiblegroups[$groups['own']->id]),
+            'Unexpected result viewing "own" visibililty group',
+        );
+        $this->assertEquals(
+            $canseenone,
+            isset($visiblegroups[$groups['none']->id]),
+            'Unexpected result viewing "none" visibililty group',
+        );
+    }
+
+    /**
+     * Data provider for {@see self::test_groups_get_user_visible_groups_with_differing_permissions_and_groupmodes()}.
+     *
+     * @return \Generator the testing scenarios
+     */
+    public static function provider_permissions_and_groupmodes(): \Generator {
+        yield 'Both permissions, no groups' => [
+            'accessallgroupscapability' => CAP_ALLOW,
+            'viewhiddengroupscapability' => CAP_ALLOW,
+            'groupmode' => NOGROUPS,
+            'canseeall' => true,
+            'canseemembers' => true,
+            'canseeown' => true,
+            'canseenone' => true,
+        ];
+
+        yield 'Access permissions, no groups' => [
+            'accessallgroupscapability' => CAP_ALLOW,
+            'viewhiddengroupscapability' => CAP_PREVENT,
+            'groupmode' => NOGROUPS,
+            'canseeall' => true,
+            'canseemembers' => true,
+            'canseeown' => true,
+            'canseenone' => false,
+        ];
+
+        yield 'View hidden permissions, no groups' => [
+            'accessallgroupscapability' => CAP_PREVENT,
+            'viewhiddengroupscapability' => CAP_ALLOW,
+            'groupmode' => NOGROUPS,
+            'canseeall' => true,
+            'canseemembers' => true,
+            'canseeown' => true,
+            'canseenone' => true,
+        ];
+
+        yield 'No permissions, no groups' => [
+            'accessallgroupscapability' => CAP_PREVENT,
+            'viewhiddengroupscapability' => CAP_PREVENT,
+            'groupmode' => NOGROUPS,
+            'canseeall' => true,
+            'canseemembers' => true,
+            'canseeown' => false,
+            'canseenone' => false,
+        ];
+
+        yield 'Both permissions, seperate groups' => [
+            'accessallgroupscapability' => CAP_ALLOW,
+            'viewhiddengroupscapability' => CAP_ALLOW,
+            'groupmode' => SEPARATEGROUPS,
+            'canseeall' => true,
+            'canseemembers' => true,
+            'canseeown' => true,
+            'canseenone' => true,
+        ];
+
+        yield 'Access permissions, seperate groups' => [
+            'accessallgroupscapability' => CAP_ALLOW,
+            'viewhiddengroupscapability' => CAP_PREVENT,
+            'groupmode' => SEPARATEGROUPS,
+            'canseeall' => true,
+            'canseemembers' => true,
+            'canseeown' => true,
+            'canseenone' => false,
+        ];
+
+        yield 'View hidden permissions, seperate groups' => [
+            'accessallgroupscapability' => CAP_PREVENT,
+            'viewhiddengroupscapability' => CAP_ALLOW,
+            'groupmode' => SEPARATEGROUPS,
+            'canseeall' => true,
+            'canseemembers' => true,
+            'canseeown' => true,
+            'canseenone' => true,
+        ];
+
+        yield 'No permissions, seperate groups' => [
+            'accessallgroupscapability' => CAP_PREVENT,
+            'viewhiddengroupscapability' => CAP_PREVENT,
+            'groupmode' => SEPARATEGROUPS,
+            'canseeall' => true,
+            'canseemembers' => true,
+            'canseeown' => false,
+            'canseenone' => false,
+        ];
+
+        yield 'Both permissions, visible groups' => [
+            'accessallgroupscapability' => CAP_ALLOW,
+            'viewhiddengroupscapability' => CAP_ALLOW,
+            'groupmode' => VISIBLEGROUPS,
+            'canseeall' => true,
+            'canseemembers' => true,
+            'canseeown' => true,
+            'canseenone' => true,
+        ];
+
+        yield 'Access permissions, visible groups' => [
+            'accessallgroupscapability' => CAP_ALLOW,
+            'viewhiddengroupscapability' => CAP_PREVENT,
+            'groupmode' => VISIBLEGROUPS,
+            'canseeall' => true,
+            'canseemembers' => true,
+            'canseeown' => true,
+            'canseenone' => false,
+        ];
+
+        yield 'View hidden permissions, visible groups' => [
+            'accessallgroupscapability' => CAP_PREVENT,
+            'viewhiddengroupscapability' => CAP_ALLOW,
+            'groupmode' => VISIBLEGROUPS,
+            'canseeall' => true,
+            'canseemembers' => true,
+            'canseeown' => true,
+            'canseenone' => true,
+        ];
+
+        yield 'No permissions, visible groups' => [
+            'accessallgroupscapability' => CAP_PREVENT,
+            'viewhiddengroupscapability' => CAP_PREVENT,
+            'groupmode' => VISIBLEGROUPS,
+            'canseeall' => true,
+            'canseemembers' => true,
+            'canseeown' => false,
+            'canseenone' => false,
+        ];
     }
 }
