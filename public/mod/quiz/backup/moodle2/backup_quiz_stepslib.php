@@ -43,9 +43,6 @@ class backup_quiz_activity_structure_step extends backup_questions_activity_stru
             'delay1', 'delay2', 'showuserpicture', 'showblocks', 'completionattemptsexhausted',
             'completionminattempts', 'allowofflineattempts', 'precreateattempts']);
 
-        // Define elements for access rule subplugin settings.
-        $this->add_subplugin_structure('quizaccess', $quiz, true);
-
         $quizgradeitems = new backup_nested_element('quiz_grade_items');
 
         $quizgradeitem = new backup_nested_element('quiz_grade_item', ['id'], ['sortorder', 'name']);
@@ -89,9 +86,6 @@ class backup_quiz_activity_structure_step extends backup_questions_activity_stru
         // This module is using questions, so produce the related question states and sessions
         // attaching them to the $attempt element based in 'uniqueid' matching.
         $this->add_question_usages($attempt, 'uniqueid');
-
-        // Define elements for access rule subplugin attempt data.
-        $this->add_subplugin_structure('quizaccess', $attempt, true);
 
         // Build the tree.
         $quiz->add_child($quizgradeitems);
@@ -164,6 +158,12 @@ class backup_quiz_activity_structure_step extends backup_questions_activity_stru
         // Define file annotations.
         $quiz->annotate_files('mod_quiz', 'intro', null); // This file area hasn't itemid.
         $feedback->annotate_files('mod_quiz', 'feedback', 'id');
+
+        // Define elements for access rule subplugin settings.
+        $this->add_subplugin_structure('quizaccess', $quiz, true);
+
+        // Define elements for access rule subplugin attempt data.
+        $this->add_subplugin_structure('quizaccess', $attempt, true);
 
         // Return the root element (quiz), wrapped into standard activity structure.
         return $this->prepare_activity_structure($quiz);

@@ -44,7 +44,7 @@ require_login($course, false, $cm);
 
 // Check the user has the required capabilities to modify an override.
 $manager->require_manage_capability();
-if (!$manager->can_view_override($override, $course, $cm)) {
+if (!$manager->can_view_override($override)) {
     throw new \moodle_exception('invalidoverrideid', 'quiz');
 }
 

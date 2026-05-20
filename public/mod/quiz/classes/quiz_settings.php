@@ -21,6 +21,7 @@ use coding_exception;
 use context;
 use context_module;
 use core_question\local\bank\question_version_status;
+use mod_quiz\local\override_manager;
 use mod_quiz\question\bank\qbank_helper;
 use mod_quiz\question\display_options;
 use moodle_exception;
@@ -64,6 +65,9 @@ class quiz_settings {
     protected $accessmanager = null;
     /** @var bool whether the current user has capability mod/quiz:preview. */
     protected $ispreviewuser = null;
+
+    /** @var null|override_manager The override manager for this quiz. **/
+    protected ?override_manager $overridemanager = null;
 
     /** @var grade_calculator|null grade calculator for this quiz. */
     protected ?grade_calculator $gradecalculator = null;
@@ -633,12 +637,12 @@ class quiz_settings {
     /**
      * Returns an override manager instance with context and quiz loaded.
      *
-     * @return \mod_quiz\local\override_manager
+     * @return override_manager
      */
-    public function get_override_manager(): \mod_quiz\local\override_manager {
-        return new \mod_quiz\local\override_manager(
-            quiz: $this->quiz,
-            context: $this->context
-        );
+    public function get_override_manager(): override_manager {
+        if (is_null($this->overridemanager)) {
+            $this->overridemanager = new override_manager($this);
+        }
+        return $this->overridemanager;
     }
 }
