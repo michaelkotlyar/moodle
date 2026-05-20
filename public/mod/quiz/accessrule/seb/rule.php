@@ -213,7 +213,7 @@ class quizaccess_seb extends access_rule_base {
     public static function delete_settings($quiz) {
         $quizsettings = seb_quiz_settings::get_by_quiz_id($quiz->id);
         // Check that there are existing settings.
-        if ($quizsettings !== false) {
+        if ($quizsettings !== null) {
             $quizsettings->delete();
         }
     }
@@ -264,10 +264,10 @@ class quizaccess_seb extends access_rule_base {
                 . 'seb.regexblocked AS seb_regexblocked, '
                 . 'seb.allowedbrowserexamkeys AS seb_allowedbrowserexamkeys, '
                 . 'seb.showsebdownloadlink AS seb_showsebdownloadlink, '
-                . 'sebtemplate.id AS seb_templateid '
-                , 'LEFT JOIN {quizaccess_seb_quizsettings} seb ON seb.quizid = quiz.id '
-                . 'LEFT JOIN {quizaccess_seb_template} sebtemplate ON seb.templateid = sebtemplate.id '
-                , []
+                . 'sebtemplate.id AS seb_templateid ',
+                'LEFT JOIN {quizaccess_seb_quizsettings} seb ON seb.quizid = quiz.id AND seb.overrideid = 0 '
+                . 'LEFT JOIN {quizaccess_seb_template} sebtemplate ON seb.templateid = sebtemplate.id ',
+                [],
         ];
     }
 

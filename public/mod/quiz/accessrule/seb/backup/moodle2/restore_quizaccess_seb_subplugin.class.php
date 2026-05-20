@@ -72,6 +72,13 @@ class restore_quizaccess_seb_subplugin extends restore_mod_quiz_access_subplugin
         $data->quizid = $this->get_new_parentid('quiz'); // Update quizid with new reference.
         $data->cmid = $this->task->get_moduleid();
 
+        // Update overrideid with new reference - if empty or no new override, set to 0.
+        if (isset($data->overrideid) && $data->overrideid) {
+            $data->overrideid = $this->get_new_parentid('quiz_override');
+        } else {
+            $data->overrideid = 0;
+        }
+
         unset($data->id);
         $data->timecreated = $data->timemodified = time();
         $data->usermodified = $USER->id;

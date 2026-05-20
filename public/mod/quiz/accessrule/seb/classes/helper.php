@@ -121,7 +121,8 @@ class helper {
         require_login($cm->course, false, $cm);
 
         // Retrieve the config for quiz.
-        $config = seb_quiz_settings::get_config_by_quiz_id($cm->instance);
+        $seb = seb_quiz_settings::get_by_quiz_id($cm->instance);
+        $config = $seb ? $seb->get_config() : null;
         if (empty($config)) {
             throw new \moodle_exception('noconfigfound', 'quizaccess_seb', '', $cm->id);
         }
