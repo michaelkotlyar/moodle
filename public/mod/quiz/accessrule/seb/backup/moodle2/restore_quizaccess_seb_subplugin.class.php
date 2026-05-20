@@ -72,6 +72,16 @@ class restore_quizaccess_seb_subplugin extends restore_mod_quiz_access_subplugin
         $data->quizid = $this->get_new_parentid('quiz'); // Update quizid with new reference.
         $data->cmid = $this->task->get_moduleid();
 
+        // Update overrideid with new reference - if no overrideid, set to 0.
+        if (!empty($data->overrideid)) {
+            if (!$this->get_setting_value('userinfo')) {
+                return;
+            }
+            $data->overrideid = $this->get_mappingid('quiz_override', $data->overrideid, -$data->overrideid);
+        } else {
+            $data->overrideid = 0;
+        }
+
         unset($data->id);
         $data->timecreated = $data->timemodified = time();
         $data->usermodified = $USER->id;
@@ -100,6 +110,14 @@ class restore_quizaccess_seb_subplugin extends restore_mod_quiz_access_subplugin
         $data = (object) $data;
 
         $quizid = $this->get_new_parentid('quiz');
+        if (!empty($data->overrideid)) {
+            if (!$this->get_setting_value('userinfo')) {
+                return;
+            }
+            $overrideid = $this->get_mappingid('quiz_override', $data->overrideid, -$data->overrideid);
+        } else {
+            $overrideid = 0;
+        }
 
         $template = null;
         if ($this->task->is_samesite()) {
@@ -124,7 +142,12 @@ class restore_quizaccess_seb_subplugin extends restore_mod_quiz_access_subplugin
         // Update the restored quiz settings to use restored template.
         // Check if template is enabled before using it.
         if ($template->get('enabled')) {
-            $DB->set_field(seb_quiz_settings::TABLE, 'templateid', $template->get('id'), ['quizid' => $quizid]);
+            $DB->set_field(
+                seb_quiz_settings::TABLE,
+                'templateid',
+                $template->get('id'),
+                ['quizid' => $quizid, 'overrideid' => $overrideid],
+            );
         }
     }
 

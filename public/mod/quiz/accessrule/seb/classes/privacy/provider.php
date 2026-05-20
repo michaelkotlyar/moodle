@@ -58,13 +58,14 @@ class provider implements
     public static function get_metadata(collection $collection): collection {
         $collection->add_database_table(
             'quizaccess_seb_quizsettings',
-             [
-                 'quizid' => 'privacy:metadata:quizaccess_seb_quizsettings:quizid',
-                 'usermodified' => 'privacy:metadata:quizaccess_seb_quizsettings:usermodified',
-                 'timecreated' => 'privacy:metadata:quizaccess_seb_quizsettings:timecreated',
-                 'timemodified' => 'privacy:metadata:quizaccess_seb_quizsettings:timemodified',
-             ],
-            'privacy:metadata:quizaccess_seb_quizsettings'
+            [
+                'quizid' => 'privacy:metadata:quizaccess_seb_quizsettings:quizid',
+                'usermodified' => 'privacy:metadata:quizaccess_seb_quizsettings:usermodified',
+                'overrideid' => 'privacy:metadata:quizaccess_seb_quizsettings:overrideid',
+                'timecreated' => 'privacy:metadata:quizaccess_seb_quizsettings:timecreated',
+                'timemodified' => 'privacy:metadata:quizaccess_seb_quizsettings:timemodified',
+            ],
+            'privacy:metadata:quizaccess_seb_quizsettings',
         );
 
         $collection->add_database_table(

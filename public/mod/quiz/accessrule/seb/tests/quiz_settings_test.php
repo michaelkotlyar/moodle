@@ -242,7 +242,7 @@ final class quiz_settings_test extends \advanced_testcase {
         $cmid = $quizsettings->get('cmid');
         $this->expectException(\moodle_exception::class);
         $this->expectExceptionMessage("No uploaded SEB config file could be found for quiz with cmid: {$cmid}");
-        $quizsettings->get_config();
+        $quizsettings->save();
     }
 
     /**
@@ -774,8 +774,8 @@ final class quiz_settings_test extends \advanced_testcase {
         $expected->save();
         $this->assertEquals($expected->to_record(), seb_quiz_settings::get_by_quiz_id($this->quiz->id)->to_record());
 
-        // Returns false for non existing quiz.
-        $this->assertFalse(seb_quiz_settings::get_by_quiz_id(7777777));
+        // Returns null for non existing quiz.
+        $this->assertNull(seb_quiz_settings::get_by_quiz_id(7777777));
     }
 
     /**
@@ -804,18 +804,18 @@ final class quiz_settings_test extends \advanced_testcase {
         $quizsettings = seb_quiz_settings::get_record(['quizid' => $this->quiz->id]);
         $expected = $quizsettings->get_config();
 
-        $this->assertEquals($expected, seb_quiz_settings::get_config_by_quiz_id($this->quiz->id));
+        $this->assertEquals($expected, seb_quiz_settings::get_by_quiz_id($this->quiz->id)->get_config());
 
         // Check that data is getting from cache.
         $quizsettings->set('showsebtaskbar', 0);
-        $this->assertNotEquals($quizsettings->get_config(), seb_quiz_settings::get_config_by_quiz_id($this->quiz->id));
+        $this->assertEquals($expected, seb_quiz_settings::get_by_quiz_id($this->quiz->id)->get_config());
 
         // Now save and check that cached as been updated.
         $quizsettings->save();
-        $this->assertEquals($quizsettings->get_config(), seb_quiz_settings::get_config_by_quiz_id($this->quiz->id));
+        $this->assertNotEquals($expected, seb_quiz_settings::get_by_quiz_id($this->quiz->id)->get_config());
 
         // Returns null for non existing quiz.
-        $this->assertNull(seb_quiz_settings::get_config_by_quiz_id(7777777));
+        $this->assertNull(seb_quiz_settings::get_by_quiz_id(7777777));
     }
 
     /**
@@ -842,20 +842,18 @@ final class quiz_settings_test extends \advanced_testcase {
      */
     public function test_get_config_key_by_quiz_id(): void {
         $quizsettings = seb_quiz_settings::get_record(['quizid' => $this->quiz->id]);
-        $expected = $quizsettings->get_config_key();
+        $confkey = $quizsettings->get_config_key();
 
-        $this->assertEquals($expected, seb_quiz_settings::get_config_key_by_quiz_id($this->quiz->id));
+        $this->assertNotEmpty($confkey);
+        $this->assertEquals($confkey, $quizsettings->get_config_key());
 
         // Check that data is getting from cache.
         $quizsettings->set('showsebtaskbar', 0);
-        $this->assertNotEquals($quizsettings->get_config_key(), seb_quiz_settings::get_config_key_by_quiz_id($this->quiz->id));
+        $this->assertEquals($confkey, $quizsettings->get_config_key());
 
         // Now save and check that cached as been updated.
         $quizsettings->save();
-        $this->assertEquals($quizsettings->get_config_key(), seb_quiz_settings::get_config_key_by_quiz_id($this->quiz->id));
-
-        // Returns null for non existing quiz.
-        $this->assertNull(seb_quiz_settings::get_config_key_by_quiz_id(7777777));
+        $this->assertNotEquals($confkey, $quizsettings->get_config_key());
     }
 
 }
