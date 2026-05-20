@@ -74,6 +74,54 @@ function xmldb_quizaccess_seb_upgrade($oldversion) {
 
     // Automatically generated Moodle v5.2.0 release upgrade line.
     // Put any upgrade step following this.
+    if ($oldversion < 2026042201) {
+        // Define table quizaccess_seb_quizsettings to be updated.
+        $table = new xmldb_table('quizaccess_seb_quizsettings');
+
+        // Adding fields to table quizaccess_seb_quizsettings.
+        $field = new xmldb_field('overrideid', XMLDB_TYPE_INTEGER, '10', null, XMLDB_NOTNULL, null, '0', 'cmid');
+
+        if (!$dbman->field_exists($table, $field)) {
+            $dbman->add_field($table, $field);
+        }
+
+        $field = new xmldb_field('overrideenabled', XMLDB_TYPE_INTEGER, '1', null, XMLDB_NOTNULL, null, '0', 'overrideid');
+
+        if (!$dbman->field_exists($table, $field)) {
+            $dbman->add_field($table, $field);
+        }
+
+        // The quizid key can be no longer unique as there can be records relating to the same quiz but represent
+        // SEB settings for a quiz override. Therefore we must swap the unique quizid key for a non-unique key.
+        $quizidkeyforeignunique = new xmldb_key('quizid', XMLDB_KEY_FOREIGN_UNIQUE, ['quizid'], 'quiz', ['id']);
+        $quizidkeyforeign = new xmldb_key('quizid', XMLDB_KEY_FOREIGN, ['quizid'], 'quiz', ['id']);
+
+        $dbman->drop_key($table, $quizidkeyforeignunique);
+        $dbman->add_key($table, $quizidkeyforeign);
+
+        // ... The same goes for the cmid key - it can no longer be unique.
+        $cmididkeyforeignunique = new xmldb_key('cmid', XMLDB_KEY_FOREIGN_UNIQUE, ['cmid'], 'course_modules', ['id']);
+        $cmididkeyforeign = new xmldb_key('cmid', XMLDB_KEY_FOREIGN, ['cmid'], 'course_modules', ['id']);
+
+        $dbman->drop_key($table, $cmididkeyforeignunique);
+        $dbman->add_key($table, $cmididkeyforeign);
+
+        // Define key overrideid (foreign) to be added to quizaccess_seb_quizsettings.
+        $overrideidkey = new xmldb_key('overrideid', XMLDB_KEY_FOREIGN, ['overrideid'], 'quiz_overrides', ['id']);
+
+        $dbman->add_key($table, $overrideidkey);
+
+        // Define index quizoverride (unique) to be added to quizaccess_seb_quizsettings.
+        $index = new xmldb_index('quizoverride', XMLDB_INDEX_UNIQUE, ['quizid', 'overrideid']);
+
+        // Conditionally launch add index quizoverride.
+        if (!$dbman->index_exists($table, $index)) {
+            $dbman->add_index($table, $index);
+        }
+
+        // Main savepoint reached.
+        upgrade_plugin_savepoint(true, 2026042201, 'quizaccess', 'seb');
+    }
 
     return true;
 }

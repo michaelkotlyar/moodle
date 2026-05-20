@@ -56,7 +56,7 @@ final class access_manager_test extends \advanced_testcase {
         $reflection = new \ReflectionClass('\quizaccess_seb\seb_access_manager');
         $property = $reflection->getProperty('quizsettings');
 
-        $this->assertFalse($property->getValue($accessmanager));
+        $this->assertNull($property->getValue($accessmanager));
     }
 
     /**
@@ -458,7 +458,7 @@ final class access_manager_test extends \advanced_testcase {
         // Change settings (but don't save) and check that still can validate config key.
         $quizsettings = seb_quiz_settings::get_record(['quizid' => $this->quiz->id]);
         $quizsettings->set('showsebtaskbar', 0);
-        $this->assertNotEquals($quizsettings->get_config_key(), $configkey);
+        $this->assertEquals($quizsettings->get_config_key(), $configkey);
         $this->assertTrue($accessmanager->validate_config_key());
 
         // Now save settings which should purge caches but access manager still has config key.

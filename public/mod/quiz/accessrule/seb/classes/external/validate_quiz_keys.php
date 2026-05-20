@@ -67,6 +67,7 @@ class validate_quiz_keys extends external_api {
      * @return array
      */
     public static function execute(string $cmid, string $url, ?string $configkey = null, ?string $browserexamkey = null): array {
+        global $USER;
         list(
                 'cmid' => $cmid,
                 'url' => $url,
@@ -93,7 +94,7 @@ class validate_quiz_keys extends external_api {
 
         $result = ['configkey' => true, 'browserexamkey' => true];
 
-        $accessmanager = new seb_access_manager(quiz_settings::create($quizid));
+        $accessmanager = new seb_access_manager(quiz_settings::create($quizid), $USER->id);
 
         // Check if there is a valid config key.
         if (!$accessmanager->validate_config_key($configkey, $url)) {
