@@ -43,9 +43,6 @@ class backup_quiz_activity_structure_step extends backup_questions_activity_stru
             'delay1', 'delay2', 'showuserpicture', 'showblocks', 'completionattemptsexhausted',
             'completionminattempts', 'allowofflineattempts', 'precreateattempts']);
 
-        // Define elements for access rule subplugin settings.
-        $this->add_subplugin_structure('quizaccess', $quiz, true);
-
         $quizgradeitems = new backup_nested_element('quiz_grade_items');
 
         $quizgradeitem = new backup_nested_element('quiz_grade_item', ['id'], ['sortorder', 'name']);
@@ -108,6 +105,9 @@ class backup_quiz_activity_structure_step extends backup_questions_activity_stru
 
         $quiz->add_child($overrides);
         $overrides->add_child($override);
+
+        // Define elements for access rule subplugin settings.
+        $this->add_subplugin_structure('quizaccess', $quiz, true);
 
         $quiz->add_child($grades);
         $grades->add_child($grade);

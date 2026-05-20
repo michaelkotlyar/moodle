@@ -77,11 +77,7 @@ class save_overrides extends external_api {
         // Filter for those overrides user can access.
         $overrides = array_filter(
             $params['overrides'],
-            fn(array $override) => $manager->can_view_override(
-                (object) $override,
-                $quizsettings->get_course(),
-                $quizsettings->get_cm(),
-            ),
+            fn(array $override) => $manager->can_view_override((object) $override),
         );
 
         // Iterate over and save all overrides.

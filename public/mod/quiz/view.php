@@ -24,7 +24,6 @@
  */
 
 use core\output\notification;
-use mod_quiz\access_manager;
 use mod_quiz\output\list_of_attempts;
 use mod_quiz\output\renderer;
 use mod_quiz\output\view_page;
@@ -61,8 +60,7 @@ $canpreview = has_capability('mod/quiz:preview', $context);
 
 // Create an object to manage all the other (non-roles) access rules.
 $timenow = time();
-$accessmanager = new access_manager($quizobj, $timenow,
-        has_capability('mod/quiz:ignoretimelimits', $context, null, false));
+$accessmanager = $quizobj->get_access_manager($timenow);
 
 // Trigger course_module_viewed event and completion.
 quiz_view($quiz, $course, $cm, $context);

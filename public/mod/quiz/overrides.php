@@ -36,6 +36,7 @@ $quiz = $quizobj->get_quiz();
 $cm = $quizobj->get_cm();
 $course = $quizobj->get_course();
 $context = $quizobj->get_context();
+$manager = $quizobj->get_override_manager();
 
 require_login($course, false, $cm);
 
@@ -45,11 +46,8 @@ if (!$canedit) {
     require_capability('mod/quiz:viewoverrides', $context);
 }
 
-$quizgroupmode = groups_get_activity_groupmode($cm);
-$showallgroups = ($quizgroupmode == NOGROUPS) || has_capability('moodle/site:accessallgroups', $context);
-
-// Get the course groups that the current user can access.
-$groups = $showallgroups ? groups_get_all_groups($cm->course) : groups_get_activity_allowed_groups($cm);
+$groups = $manager->get_groups();
+$showallgroups = $manager->can_showallgroups();
 
 // Default mode is "group", unless there are no groups.
 if ($mode != "user" and $mode != "group") {
@@ -96,21 +94,7 @@ $headers = [];
 // Fetch all overrides.
 if ($groupmode) {
     $headers[] = get_string('group');
-    // To filter the result by the list of groups that the current user has access to.
-    if ($groups) {
-        $params = ['quizid' => $quiz->id];
-        list($insql, $inparams) = $DB->get_in_or_equal(array_keys($groups), SQL_PARAMS_NAMED);
-        $params += $inparams;
-
-        $sql = "SELECT o.*, g.name
-                  FROM {quiz_overrides} o
-                  JOIN {groups} g ON o.groupid = g.id
-                 WHERE o.quiz = :quizid AND g.id $insql
-              ORDER BY g.name";
-
-        $overrides = $DB->get_records_sql($sql, $params);
-    }
-
+    $overrides = $manager->get_group_overrides();
 } else {
     // User overrides.
     $colclasses[] = 'colname';
@@ -123,35 +107,7 @@ if ($groupmode) {
         $headers[] = \core_user\fields::get_display_name($field);
     }
 
-    list($sort, $params) = users_order_by_sql('u', null, $context, $extrauserfields);
-    $params['quizid'] = $quiz->id;
-
-    if ($showallgroups) {
-        $groupsjoin = '';
-        $groupswhere = '';
-
-    } else if ($groups) {
-        list($insql, $inparams) = $DB->get_in_or_equal(array_keys($groups), SQL_PARAMS_NAMED);
-        $groupsjoin = 'JOIN {groups_members} gm ON u.id = gm.userid';
-        $groupswhere = ' AND gm.groupid ' . $insql;
-        $params += $inparams;
-
-    } else {
-        // User cannot see any data.
-        $groupsjoin = '';
-        $groupswhere = ' AND 1 = 2';
-    }
-
-    $overrides = $DB->get_records_sql("
-            SELECT o.*, {$userfieldssql->selects}
-              FROM {quiz_overrides} o
-              JOIN {user} u ON o.userid = u.id
-                  {$userfieldssql->joins}
-              $groupsjoin
-             WHERE o.quiz = :quizid
-               $groupswhere
-             ORDER BY $sort
-            ", array_merge($params, $userfieldssql->params));
+    $overrides = $manager->get_user_overrides();
 }
 
 // Initialise table.
@@ -195,54 +151,8 @@ foreach ($overrides as $override) {
         $hasinactive = true;
     }
 
-    // Prepare the information about which settings are overridden.
-    $fields = [];
-    $values = [];
-
-    // Format timeopen.
-    if (isset($override->timeopen)) {
-        $fields[] = get_string('quizopens', 'quiz');
-        $values[] = $override->timeopen > 0 ?
-                userdate($override->timeopen) : get_string('noopen', 'quiz');
-    }
-    // Format timeclose.
-    if (isset($override->timeclose)) {
-        $fields[] = get_string('quizcloses', 'quiz');
-        $values[] = $override->timeclose > 0 ?
-                userdate($override->timeclose) : get_string('noclose', 'quiz');
-    }
-    // Format timelimit.
-    if (isset($override->timelimit)) {
-        $fields[] = get_string('timelimit', 'quiz');
-        $values[] = $override->timelimit > 0 ?
-                format_time($override->timelimit) : get_string('none', 'quiz');
-    }
-    // Format number of attempts.
-    if (isset($override->attempts)) {
-        $fields[] = get_string('attempts', 'quiz');
-        $values[] = $override->attempts > 0 ?
-                $override->attempts : get_string('unlimited');
-    }
-    // Format password.
-    if (isset($override->password)) {
-        $fields[] = get_string('requirepassword', 'quiz');
-        $values[] = $override->password !== '' ?
-                get_string('enabled', 'quiz') : get_string('none', 'quiz');
-    }
-
-    // Format reason.
-    if (isset($override->reason) && $override->reason !== '') {
-        $formattedreason = format_text(
-            $override->reason,
-            $override->reasonformat ?? FORMAT_MOODLE,
-            ['context' => $context],
-        );
-
-        if ($formattedreason !== '') {
-            $fields[] = get_string('overridereason', 'quiz');
-            $values[] = $formattedreason;
-        }
-    }
+    // Add override properties to table fields.
+    [$fields, $values] = $manager->add_table_fields($override);
 
     // Prepare the information about who this override applies to.
     $extranamebit = $active ? '' : '*';

@@ -236,92 +236,15 @@ function quiz_delete_instance($id) {
  * @return stdClass $quiz The updated quiz object.
  */
 function quiz_update_effective_access($quiz, $userid) {
-    global $DB;
-
-    // Check for user override.
-    $override = $DB->get_record('quiz_overrides', ['quiz' => $quiz->id, 'userid' => $userid]);
-
-    if (!$override) {
-        $override = new stdClass();
-        $override->timeopen = null;
-        $override->timeclose = null;
-        $override->timelimit = null;
-        $override->attempts = null;
-        $override->password = null;
-    }
-
-    // Check for group overrides.
-    $groupings = groups_get_user_groups($quiz->course, $userid);
-
-    if (!empty($groupings[0])) {
-        // Select all overrides that apply to the User's groups.
-        [$extra, $params] = $DB->get_in_or_equal(array_values($groupings[0]));
-        $sql = "SELECT * FROM {quiz_overrides}
-                WHERE groupid $extra AND quiz = ?";
-        $params[] = $quiz->id;
-        $records = $DB->get_records_sql($sql, $params);
-
-        // Combine the overrides.
-        $opens = [];
-        $closes = [];
-        $limits = [];
-        $attempts = [];
-        $passwords = [];
-
-        foreach ($records as $gpoverride) {
-            if (isset($gpoverride->timeopen)) {
-                $opens[] = $gpoverride->timeopen;
-            }
-            if (isset($gpoverride->timeclose)) {
-                $closes[] = $gpoverride->timeclose;
-            }
-            if (isset($gpoverride->timelimit)) {
-                $limits[] = $gpoverride->timelimit;
-            }
-            if (isset($gpoverride->attempts)) {
-                $attempts[] = $gpoverride->attempts;
-            }
-            if (isset($gpoverride->password)) {
-                $passwords[] = $gpoverride->password;
-            }
-        }
-        // If there is a user override for a setting, ignore the group override.
-        if (is_null($override->timeopen) && count($opens)) {
-            $override->timeopen = min($opens);
-        }
-        if (is_null($override->timeclose) && count($closes)) {
-            if (in_array(0, $closes)) {
-                $override->timeclose = 0;
-            } else {
-                $override->timeclose = max($closes);
-            }
-        }
-        if (is_null($override->timelimit) && count($limits)) {
-            if (in_array(0, $limits)) {
-                $override->timelimit = 0;
-            } else {
-                $override->timelimit = max($limits);
-            }
-        }
-        if (is_null($override->attempts) && count($attempts)) {
-            if (in_array(0, $attempts)) {
-                $override->attempts = 0;
-            } else {
-                $override->attempts = max($attempts);
-            }
-        }
-        if (is_null($override->password) && count($passwords)) {
-            $override->password = array_shift($passwords);
-            if (count($passwords)) {
-                $override->extrapasswords = $passwords;
-            }
-        }
-
-    }
+    // Get quiz override manager to fetch user quiz.
+    $cm = get_coursemodule_from_instance('quiz', $quiz->id);
+    $course = get_course($cm->course);
+    $quizobj = new quiz_settings($quiz, $cm, $course);
+    $overridemanager = $quizobj->get_override_manager();
+    $override = $overridemanager->get_effective_override($userid);
 
     // Merge with quiz defaults.
-    $keys = ['timeopen', 'timeclose', 'timelimit', 'attempts', 'password', 'extrapasswords'];
-    foreach ($keys as $key) {
+    foreach ($overridemanager->get_override_setting_names() as $key) {
         if (isset($override->{$key})) {
             $quiz->{$key} = $override->{$key};
         }

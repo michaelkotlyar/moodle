@@ -60,11 +60,7 @@ class get_overrides extends external_api {
         // Filter for those overrides user can access.
         $overrides = array_filter(
             $manager->get_all_overrides(),
-            fn(\stdClass $override) => $manager->can_view_override(
-                $override,
-                $quizsettings->get_course(),
-                $quizsettings->get_cm(),
-            ),
+            fn(\stdClass $override) => $manager->can_view_override($override),
         );
 
         return ['overrides' => $overrides];

@@ -18,6 +18,7 @@ namespace mod_quiz\local;
 
 use advanced_testcase;
 use context_module;
+use mod_quiz\quiz_settings;
 use stdClass;
 
 /**
@@ -47,7 +48,8 @@ final class quiz_overrides_cache_manager_test extends advanced_testcase {
         $group = $generator->create_group(['courseid' => $course->id]);
         groups_add_member($group->id, $user2->id);
 
-        $manager = new override_manager($quiz, context_module::instance($quiz->cmid));
+        $quizobj = quiz_settings::create($quiz->id);
+        $manager = $quizobj->get_override_manager();
 
         return (object) [
             'quiz' => $quiz,
