@@ -72,6 +72,22 @@ class restore_quizaccess_seb_subplugin extends restore_mod_quiz_access_subplugin
         $data->quizid = $this->get_new_parentid('quiz'); // Update quizid with new reference.
         $data->cmid = $this->task->get_moduleid();
 
+        // Update overrideid with new reference - if no overrideid, set to 0.
+        if (!empty($data->overrideid)) {
+            $mappedoverrideid = $this->get_mappingid('quiz_override', $data->overrideid);
+            if (empty($mappedoverrideid)) {
+                // Skip if overrideid exists but can't map to new override id.
+                $this->log(
+                    "Override id \"{$data->overrideid}\" could not be mapped. Skipping quizaccess_seb_quizsettings record.",
+                    backup::LOG_INFO,
+                );
+                return;
+            }
+            $data->overrideid = $mappedoverrideid;
+        } else {
+            $data->overrideid = 0;
+        }
+
         unset($data->id);
         $data->timecreated = $data->timemodified = time();
         $data->usermodified = $USER->id;

@@ -16,8 +16,13 @@
 
 namespace quizaccess_seb;
 
+use PHPUnit\Framework\Attributes\CoversClass;
+use quizaccess_seb\seb_quiz_settings;
+
 defined('MOODLE_INTERNAL') || die();
 
+global $CFG;
+require_once($CFG->libdir . '/phpunit/classes/restore_date_testcase.php');
 require_once(__DIR__ . '/test_helper_trait.php');
 
 /**
@@ -28,7 +33,10 @@ require_once(__DIR__ . '/test_helper_trait.php');
  * @copyright 2020 Catalyst IT
  * @license   http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
-final class backup_restore_test extends \advanced_testcase {
+#[CoversClass('quizaccess_seb\backup_quizaccess_seb_subplugin')]
+#[CoversClass('quizaccess_seb\restore_quizaccess_seb_subplugin')]
+#[CoversClass(seb_quiz_settings::class)]
+final class backup_restore_test extends \restore_date_testcase {
     use \quizaccess_seb_test_helper_trait;
 
 
@@ -324,4 +332,128 @@ final class backup_restore_test extends \advanced_testcase {
         $this->assertEquals(2, template::count_records());
     }
 
+    /**
+     * Test backup and restore seb settings with an override.
+     */
+    public function test_backup_restore_override(): void {
+        global $DB;
+        $this->quiz = $this->create_test_quiz($this->course, settings_provider::USE_SEB_CONFIG_MANUALLY);
+        $this->user = $this->getDataGenerator()->create_user();
+        $this->getDataGenerator()->enrol_user($this->user->id, $this->course->id);
+
+        // Create SEB settings for quiz.
+        $seb = seb_quiz_settings::get_record(['quizid' => $this->quiz->id]);
+        $seb->set('showsebdownloadlink', 0);
+        $seb->set('quitpassword', '123');
+        $seb->save();
+
+        $this->assertEquals(1, seb_quiz_settings::count_records());
+        $this->assertEquals(0, $DB->count_records('quiz_overrides'));
+        $this->assertEquals(1, $DB->count_records('quizaccess_seb_quizsettings'));
+
+        // Create an override.
+        $overrideid = $this->save_override($this->user);
+
+        $this->assertEquals(2, seb_quiz_settings::count_records());
+        $this->assertEquals(1, $DB->count_records('quiz_overrides'));
+        $this->assertEquals(2, $DB->count_records('quizaccess_seb_quizsettings'));
+
+        // Backup and count override records.
+        $this->backup_and_restore($this->course);
+        $restoredquizid = $this->quiz->id + 1;
+        $restoredcmid = get_coursemodule_from_instance('quiz', $restoredquizid)->id;
+
+        $this->assertEquals(4, seb_quiz_settings::count_records());
+        $this->assertEquals(2, $DB->count_records('quiz_overrides'));
+        $this->assertEquals(4, $DB->count_records('quizaccess_seb_quizsettings'));
+
+        // Check values are as expected.
+
+        // Check there are 2 each of overridden/non-overridden seb settings.
+        $quizoverrides = $DB->get_records('quiz_overrides');
+        $quizaccesssebquizsettings = $DB->get_records('quizaccess_seb_quizsettings', ['overrideid' => 0]);
+        [$insql, $inparams] = $DB->get_in_or_equal(array_keys($quizoverrides));
+        $overriddenquizaccesssebquizsettings = $DB->get_records_select(
+            'quizaccess_seb_quizsettings',
+            "overrideid $insql",
+            $inparams,
+        );
+
+        $this->assertCount(2, $quizaccesssebquizsettings);
+        $this->assertCount(2, $overriddenquizaccesssebquizsettings);
+
+        $quizaccesssebquizsettings = array_values($quizaccesssebquizsettings);
+        $overriddenquizaccesssebquizsettings = array_values($overriddenquizaccesssebquizsettings);
+
+        // Compare override settings to make sure nothing is lost.
+        // Exclude comparing some of the values as they are expected to be different.
+        $keys = array_diff(
+            array_keys(seb_quiz_settings::properties_definition()),
+            ['id', 'overrideid', 'usermodified', 'quizid', 'cmid', 'timecreated', 'timemodified'],
+        );
+        foreach ($keys as $key) {
+            $this->assertEquals(
+                $quizaccesssebquizsettings[0]->{$key},
+                $quizaccesssebquizsettings[1]->{$key},
+                "{$key} is mismatched.",
+            );
+            $this->assertEquals(
+                $overriddenquizaccesssebquizsettings[0]->{$key},
+                $overriddenquizaccesssebquizsettings[1]->{$key},
+                "{$key} is mismatched.",
+            );
+        }
+    }
+
+
+    /**
+     * Test backup and restore course and quiz with only an SEB override.
+     */
+    public function test_backup_restore_override_no_seb(): void {
+        global $DB;
+        $this->quiz = $this->create_test_quiz($this->course, settings_provider::USE_SEB_CONFIG_MANUALLY);
+        $this->user = $this->getDataGenerator()->create_user();
+        $this->getDataGenerator()->enrol_user($this->user->id, $this->course->id);
+
+        $this->assertEquals(1, seb_quiz_settings::count_records());
+        $this->assertEquals(0, $DB->count_records('quiz_overrides'));
+        $this->assertEquals(1, $DB->count_records('quizaccess_seb_quizsettings'));
+
+        // Create an override.
+        $overrideid = $this->save_override($this->user);
+
+        $this->assertEquals(2, seb_quiz_settings::count_records());
+        $this->assertEquals(1, $DB->count_records('quiz_overrides'));
+        $this->assertEquals(2, $DB->count_records('quizaccess_seb_quizsettings'));
+
+        // Backup and count override records.
+        $this->backup_and_restore($this->course);
+
+        $this->assertEquals(4, seb_quiz_settings::count_records());
+        $this->assertEquals(2, $DB->count_records('quiz_overrides'));
+        $this->assertEquals(4, $DB->count_records('quizaccess_seb_quizsettings'));
+
+        // Check values are as expected.
+        $override = $DB->get_record('quiz_overrides', ['id' => $overrideid]);
+        $seboverride = $DB->get_record('quizaccess_seb_quizsettings', ['overrideid' => $overrideid]);
+        $restoredoverride = $DB->get_record_sql("SELECT * FROM {quiz_overrides} WHERE id <> ?", [$overrideid]);
+        $restoredseboverride = $DB->get_record_sql(
+            "SELECT * FROM {quizaccess_seb_quizsettings} WHERE overrideid <> ? AND overrideid > 0",
+            [$overrideid],
+        );
+
+        $this->assertEquals($override->id, $seboverride->overrideid);
+        $this->assertEquals($restoredoverride->id, $restoredseboverride->overrideid);
+        $this->assertNotEquals($override->id, $restoredoverride->id);
+
+        // Compare override settings to make sure nothing is lost.
+        // Exclude comparing some of the values as they are expected to be different.
+        $keys = array_diff(
+            array_keys(seb_quiz_settings::properties_definition()),
+            ['id', 'overrideid', 'usermodified', 'quizid', 'cmid', 'timecreated', 'timemodified'],
+        );
+        foreach ($keys as $key) {
+            $this->assertEquals($seboverride->{$key}, $restoredseboverride->{$key});
+        }
+    }
 }

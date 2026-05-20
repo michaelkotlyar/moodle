@@ -29,7 +29,8 @@
 
 namespace quizaccess_seb;
 
-use context_module;
+use core\context\course as context_course;
+use core\context\module as context_module;
 use context_user;
 use lang_string;
 use stdClass;
@@ -188,16 +189,18 @@ class settings_provider {
      * @param \MoodleQuickForm $mform the wrapped MoodleQuickForm.
      */
     protected static function add_seb_usage_options(\mod_quiz_mod_form $quizform, \MoodleQuickForm $mform) {
+        $context = $quizform->get_context();
+        $options = self::get_requiresafeexambrowser_options($context);
         $element = $mform->createElement(
             'select',
             'seb_requiresafeexambrowser',
             get_string('seb_requiresafeexambrowser', 'quizaccess_seb'),
-            self::get_requiresafeexambrowser_options($quizform->get_context())
+            $options,
         );
 
         self::insert_element($quizform, $mform, $element);
         self::set_type($quizform, $mform, 'seb_requiresafeexambrowser', PARAM_INT);
-        self::set_default($quizform, $mform, 'seb_requiresafeexambrowser', self::USE_SEB_NO);
+        self::set_default($quizform, $mform, 'seb_requiresafeexambrowser', array_key_first($options));
         self::add_help_button($quizform, $mform, 'seb_requiresafeexambrowser');
 
         if (self::is_conflicting_permissions($quizform->get_context())) {
@@ -525,52 +528,49 @@ class settings_provider {
      * option while a course manager cannot. Therefore it will return true for a course
      * manager and return false for a site admin.
      *
-     * @param \context $context Context used with capability checking.
+     * @param context_course|context_module $context Context used with capability checking.
      *
      * @return bool
      */
-    public static function is_conflicting_permissions(\context $context) {
-        if ($context instanceof \context_course) {
+    public static function is_conflicting_permissions(context_course|context_module $context) {
+        if ($context instanceof context_course) {
             return false;
         }
 
-        $settings = seb_quiz_settings::get_record(['cmid' => (int) $context->instanceid]);
+        $settings = seb_quiz_settings::get_record(['cmid' => (int) $context->instanceid, 'overrideid' => 0]);
 
         if (empty($settings)) {
             return false;
         }
 
-        if (!self::can_use_seb_template($context) &&
-                $settings->get('requiresafeexambrowser') == self::USE_SEB_TEMPLATE) {
-            return true;
+        switch ($settings->get('requiresafeexambrowser')) {
+            case self::USE_SEB_TEMPLATE:
+                return !self::can_use_seb_template($context);
+            case self::USE_SEB_CLIENT_CONFIG:
+                return !self::can_use_seb_client_config($context);
+            case self::USE_SEB_UPLOAD_CONFIG:
+                return !self::can_upload_seb_file($context);
+            case self::USE_SEB_CONFIG_MANUALLY:
+                return !self::can_configure_manually($context);
+            case self::USE_SEB_NO:
+                return !self::can_donotrequire($context);
+            default:
+                return false;
         }
-
-        if (!self::can_use_seb_client_config($context) &&
-                $settings->get('requiresafeexambrowser') == self::USE_SEB_CLIENT_CONFIG) {
-            return true;
-        }
-
-        if (!self::can_upload_seb_file($context) &&
-                $settings->get('requiresafeexambrowser') == self::USE_SEB_UPLOAD_CONFIG) {
-            return true;
-        }
-
-        if (!self::can_configure_manually($context) &&
-                $settings->get('requiresafeexambrowser') == self::USE_SEB_CONFIG_MANUALLY) {
-            return true;
-        }
-
-        return false;
     }
 
     /**
      * Returns a list of all options of SEB usage.
      *
-     * @param \context $context Context used with capability checking selection options.
+     * @param context_course|context_module $context Context used with capability checking selection options.
      * @return array
      */
-    public static function get_requiresafeexambrowser_options(\context $context): array {
-        $options[self::USE_SEB_NO] = get_string('no');
+    public static function get_requiresafeexambrowser_options(context_course|context_module $context): array {
+        $options = [];
+
+        if (self::can_donotrequire($context) || self::is_conflicting_permissions($context)) {
+            $options[self::USE_SEB_NO] = get_string('no');
+        }
 
         if (self::can_configure_manually($context) || self::is_conflicting_permissions($context)) {
             $options[self::USE_SEB_CONFIG_MANUALLY] = get_string('seb_use_manually', 'quizaccess_seb');
@@ -595,9 +595,11 @@ class settings_provider {
 
     /**
      * Returns a list of templates.
+     *
+     * @param int $cmid The course module ID.
      * @return array
      */
-    protected static function get_template_options($cmid): array {
+    public static function get_template_options(int $cmid): array {
         $templates = [];
         $templatetable = template::TABLE;
         $sebquizsettingstable = seb_quiz_settings::TABLE;
@@ -761,70 +763,70 @@ class settings_provider {
     /**
      * Check if the current user can configure SEB.
      *
-     * @param \context $context Context to check access in.
+     * @param context_course|context_module $context Context to check access in.
      * @return bool
      */
-    public static function can_configure_seb(\context $context): bool {
+    public static function can_configure_seb(context_course|context_module $context): bool {
         return has_capability('quizaccess/seb:manage_seb_requiresafeexambrowser', $context);
     }
 
     /**
      * Check if the current user can select to use the SEB client configuration.
      *
-     * @param \context $context Context to check access in.
+     * @param context_course|context_module $context Context to check access in.
      * @return bool
      */
-    public static function can_use_seb_client_config(\context $context): bool {
+    public static function can_use_seb_client_config(context_course|context_module $context): bool {
         return has_capability('quizaccess/seb:manage_seb_usesebclientconfig', $context);
     }
 
     /**
      * Check if the current user can use preconfigured templates.
      *
-     * @param \context $context Context to check access in.
+     * @param context_course|context_module $context Context to check access in.
      * @return bool
      */
-    public static function can_use_seb_template(\context $context): bool {
+    public static function can_use_seb_template(context_course|context_module $context): bool {
         return has_capability('quizaccess/seb:manage_seb_templateid', $context);
     }
 
     /**
      * Check if the current user can upload own SEB config file.
      *
-     * @param \context $context Context to check access in.
+     * @param context_course|context_module $context Context to check access in.
      * @return bool
      */
-    public static function can_upload_seb_file(\context $context): bool {
+    public static function can_upload_seb_file(context_course|context_module $context): bool {
         return has_capability('quizaccess/seb:manage_filemanager_sebconfigfile', $context);
     }
 
     /**
      * Check if the current user can change Show Safe Exam Browser download button setting.
      *
-     * @param \context $context Context to check access in.
+     * @param context_course|context_module $context Context to check access in.
      * @return bool
      */
-    public static function can_change_seb_showsebdownloadlink(\context $context): bool {
+    public static function can_change_seb_showsebdownloadlink(context_course|context_module $context): bool {
         return has_capability('quizaccess/seb:manage_seb_showsebdownloadlink', $context);
     }
 
     /**
      * Check if the current user can change Allowed Browser Exam Keys setting.
      *
-     * @param \context $context Context to check access in.
+     * @param context_course|context_module $context Context to check access in.
      * @return bool
      */
-    public static function can_change_seb_allowedbrowserexamkeys(\context $context): bool {
+    public static function can_change_seb_allowedbrowserexamkeys(context_course|context_module $context): bool {
         return has_capability('quizaccess/seb:manage_seb_allowedbrowserexamkeys', $context);
     }
 
     /**
      * Check if the current user can config SEB manually.
      *
-     * @param \context $context Context to check access in.
+     * @param context_course|context_module $context Context to check access in.
      * @return bool
      */
-    public static function can_configure_manually(\context $context): bool {
+    public static function can_configure_manually(context_course|context_module $context): bool {
         if (!has_capability('quizaccess/seb:manage_seb_configuremanually', $context)) {
             return false;
         }
@@ -839,13 +841,42 @@ class settings_provider {
     }
 
     /**
+     * Check if the current user can set "Do not require SEB" setting.
+     *
+     * Used in {@see self::is_conflicting_permissions()} and {@see self::get_requiresafeexambrowser_options()} to determine if the
+     * user can submit or view the option to disable SEB.
+     *
+     * @see self::is_conflicting_permissions()
+     * @see self::get_requiresafeexambrowser_options()
+     * @param context_course|context_module $context Context to check access in.
+     * @return bool
+     */
+    public static function can_donotrequire(context_course|context_module $context): bool {
+        return has_capability('quizaccess/seb:manage_seb_donotrequiresafeexambrowser', $context);
+    }
+
+    /**
+     * Check if the current user can set "Do not require SEB" setting in the override menu.
+     *
+     * Used in {@see quizaccess_seb\overrides_controller::add_form_fields()} to determine if the user can have the option to
+     * override and disable the quiz SEB settings.
+     *
+     * @see quizaccess_seb\overrides_controller::add_form_fields()
+     * @param context_course|context_module $context Context to check access in.
+     * @return bool
+     */
+    public static function can_override_donotrequire(context_course|context_module $context): bool {
+        return has_capability('quizaccess/seb:manage_seb_donotrequiresafeexambrowser_override', $context);
+    }
+
+    /**
      * Check if the current user can manage provided SEB setting.
      *
      * @param string $settingname Name of the setting.
-     * @param \context $context Context to check access in.
+     * @param context_course|context_module $context Context to check access in.
      * @return bool
      */
-    public static function can_manage_seb_config_setting(string $settingname, \context $context): bool {
+    public static function can_manage_seb_config_setting(string $settingname, context_course|context_module $context): bool {
         $capsttocheck = [];
 
         foreach (self::get_seb_settings_map() as $type => $settings) {
