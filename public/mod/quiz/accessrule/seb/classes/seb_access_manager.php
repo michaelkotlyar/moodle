@@ -28,7 +28,7 @@
 
 namespace quizaccess_seb;
 
-use context_module;
+use core\context\module as context_module;
 use mod_quiz\quiz_settings;
 
 defined('MOODLE_INTERNAL') || die();
@@ -62,13 +62,16 @@ class seb_access_manager {
     /**
      * The access_manager constructor.
      *
+     * Optionally provide a user ID to load user targeted SEB settings, otherwise will load general quiz SEB settings.
+     *
      * @param quiz_settings $quiz The details of the quiz.
+     * @param ?int $userid The ID of the user when providing user-specific SEB settings.
      */
-    public function __construct(quiz_settings $quiz) {
+    public function __construct(quiz_settings $quiz, ?int $userid = null) {
         $this->quiz = $quiz;
         $this->context = context_module::instance($quiz->get_cmid());
-        $this->quizsettings = seb_quiz_settings::get_by_quiz_id($quiz->get_quizid());
-        $this->validconfigkey = seb_quiz_settings::get_config_key_by_quiz_id($quiz->get_quizid());
+        $this->quizsettings = seb_quiz_settings::get_by_quiz_id($quiz->get_quizid(), $userid);
+        $this->validconfigkey = $this->quizsettings ? $this->quizsettings->get_config_key() : null;
     }
 
     /**

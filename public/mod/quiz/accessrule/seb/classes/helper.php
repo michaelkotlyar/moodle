@@ -111,9 +111,10 @@ class helper {
      * Get seb config content for a particular quiz. This method checks caps.
      *
      * @param string $cmid The course module ID for a quiz with config.
+     * @param ?int $userid Optional user ID to get override config for, if null will get default quiz config.
      * @return string SEB config string.
      */
-    public static function get_seb_config_content(string $cmid): string {
+    public static function get_seb_config_content(string $cmid, ?int $userid = null): string {
         // Try and get the course module.
         $cm = get_coursemodule_from_id('quiz', $cmid, 0, false, MUST_EXIST);
 
@@ -121,7 +122,8 @@ class helper {
         require_login($cm->course, false, $cm);
 
         // Retrieve the config for quiz.
-        $config = seb_quiz_settings::get_config_by_quiz_id($cm->instance);
+        $seb = seb_quiz_settings::get_by_quiz_id($cm->instance, $userid);
+        $config = $seb ? $seb->get_config() : null;
         if (empty($config)) {
             throw new \moodle_exception('noconfigfound', 'quizaccess_seb', '', $cm->id);
         }

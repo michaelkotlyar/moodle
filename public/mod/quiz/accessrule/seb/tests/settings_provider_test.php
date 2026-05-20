@@ -671,62 +671,14 @@ final class settings_provider_test extends \advanced_testcase {
         $this->assertCount(5, $options);
         $this->assertTrue(array_key_exists(settings_provider::USE_SEB_TEMPLATE, $options));
 
-        // A new user does not have the capability to use the file manager and template.
         $this->set_up_user_and_role();
 
         $options = settings_provider::get_requiresafeexambrowser_options($this->context);
-
-        $this->assertCount(1, $options);
-        $this->assertFalse(array_key_exists(settings_provider::USE_SEB_CONFIG_MANUALLY, $options));
-        $this->assertFalse(array_key_exists(settings_provider::USE_SEB_TEMPLATE, $options));
-        $this->assertFalse(array_key_exists(settings_provider::USE_SEB_UPLOAD_CONFIG, $options));
-        $this->assertFalse(array_key_exists(settings_provider::USE_SEB_CLIENT_CONFIG, $options));
-        $this->assertTrue(array_key_exists(settings_provider::USE_SEB_NO, $options));
+        $this->assertCount(0, $options);
 
         assign_capability($settingcapability, CAP_ALLOW, $this->roleid, $this->context->id);
         $options = settings_provider::get_requiresafeexambrowser_options($this->context);
-        $this->assertCount(1, $options);
-        $this->assertFalse(array_key_exists(settings_provider::USE_SEB_CONFIG_MANUALLY, $options));
-        $this->assertFalse(array_key_exists(settings_provider::USE_SEB_TEMPLATE, $options));
-        $this->assertFalse(array_key_exists(settings_provider::USE_SEB_UPLOAD_CONFIG, $options));
-        $this->assertFalse(array_key_exists(settings_provider::USE_SEB_CLIENT_CONFIG, $options));
-        $this->assertTrue(array_key_exists(settings_provider::USE_SEB_NO, $options));
-
-        assign_capability('quizaccess/seb:manage_seb_configuremanually', CAP_ALLOW, $this->roleid, $this->context->id);
-        $options = settings_provider::get_requiresafeexambrowser_options($this->context);
-        $this->assertCount(2, $options);
-        $this->assertTrue(array_key_exists(settings_provider::USE_SEB_CONFIG_MANUALLY, $options));
-        $this->assertFalse(array_key_exists(settings_provider::USE_SEB_TEMPLATE, $options));
-        $this->assertFalse(array_key_exists(settings_provider::USE_SEB_UPLOAD_CONFIG, $options));
-        $this->assertFalse(array_key_exists(settings_provider::USE_SEB_CLIENT_CONFIG, $options));
-        $this->assertTrue(array_key_exists(settings_provider::USE_SEB_NO, $options));
-
-        assign_capability('quizaccess/seb:manage_seb_usesebclientconfig', CAP_ALLOW, $this->roleid, $this->context->id);
-        $options = settings_provider::get_requiresafeexambrowser_options($this->context);
-        $this->assertCount(3, $options);
-        $this->assertTrue(array_key_exists(settings_provider::USE_SEB_CONFIG_MANUALLY, $options));
-        $this->assertFalse(array_key_exists(settings_provider::USE_SEB_TEMPLATE, $options));
-        $this->assertFalse(array_key_exists(settings_provider::USE_SEB_UPLOAD_CONFIG, $options));
-        $this->assertTrue(array_key_exists(settings_provider::USE_SEB_CLIENT_CONFIG, $options));
-        $this->assertTrue(array_key_exists(settings_provider::USE_SEB_NO, $options));
-
-        assign_capability('quizaccess/seb:manage_seb_templateid', CAP_ALLOW, $this->roleid, $this->context->id);
-        $options = settings_provider::get_requiresafeexambrowser_options($this->context);
-        $this->assertCount(4, $options);
-        $this->assertTrue(array_key_exists(settings_provider::USE_SEB_CONFIG_MANUALLY, $options));
-        $this->assertTrue(array_key_exists(settings_provider::USE_SEB_TEMPLATE, $options));
-        $this->assertFalse(array_key_exists(settings_provider::USE_SEB_UPLOAD_CONFIG, $options));
-        $this->assertTrue(array_key_exists(settings_provider::USE_SEB_CLIENT_CONFIG, $options));
-        $this->assertTrue(array_key_exists(settings_provider::USE_SEB_NO, $options));
-
-        assign_capability('quizaccess/seb:manage_filemanager_sebconfigfile', CAP_ALLOW, $this->roleid, $this->context->id);
-        $options = settings_provider::get_requiresafeexambrowser_options($this->context);
-        $this->assertCount(5, $options);
-        $this->assertTrue(array_key_exists(settings_provider::USE_SEB_CONFIG_MANUALLY, $options));
-        $this->assertTrue(array_key_exists(settings_provider::USE_SEB_TEMPLATE, $options));
-        $this->assertTrue(array_key_exists(settings_provider::USE_SEB_UPLOAD_CONFIG, $options));
-        $this->assertTrue(array_key_exists(settings_provider::USE_SEB_CLIENT_CONFIG, $options));
-        $this->assertTrue(array_key_exists(settings_provider::USE_SEB_NO, $options));
+        $this->assertCount(0, $options);
     }
 
     /**
@@ -735,25 +687,74 @@ final class settings_provider_test extends \advanced_testcase {
     public function test_get_requiresafeexambrowser_options_with_conflicting_permissions(): void {
         $this->resetAfterTest();
         $this->setAdminUser();
-        $this->course = $this->getDataGenerator()->create_course();
 
+        $this->course = $this->getDataGenerator()->create_course();
         $this->quiz = $this->create_test_quiz($this->course, settings_provider::USE_SEB_CONFIG_MANUALLY);
         $this->context = \context_module::instance($this->quiz->cmid);
 
-        $template = $this->create_template();
+        $this->assertFalse(settings_provider::is_conflicting_permissions($this->context));
 
-        $settings = seb_quiz_settings::get_record(['quizid' => $this->quiz->id]);
-        $settings->set('templateid', $template->get('id'));
-        $settings->set('requiresafeexambrowser', settings_provider::USE_SEB_TEMPLATE);
-        $settings->save();
+        $this->set_up_user_and_role();
+
+        $this->assertTrue(settings_provider::is_conflicting_permissions($this->context));
+
+        $options = settings_provider::get_requiresafeexambrowser_options($this->context);
+        $this->assertCount(0, $options);
+    }
+
+    /**
+     * Test SEB usage options with limited permissions.
+     * @covers \settings_provider::get_requiresafeexambrowser_options
+     */
+    public function test_get_requiresafeexambrowser_options_with_limited_permisssions(): void {
+        $this->resetAfterTest();
+
+        $this->course = $this->getDataGenerator()->create_course();
+        $this->quiz = $this->getDataGenerator()->create_module('quiz', ['course' => $this->course->id]);
+        $this->context = \context_module::instance($this->quiz->cmid);
 
         $this->set_up_user_and_role();
 
         $options = settings_provider::get_requiresafeexambrowser_options($this->context);
+        $this->assertCount(0, $options);
 
-        // If there is nay conflict we return full list of options.
+        assign_capability('quizaccess/seb:manage_seb_donotrequiresafeexambrowser', CAP_ALLOW, $this->roleid, $this->context->id);
+        $options = settings_provider::get_requiresafeexambrowser_options($this->context);
+        $this->assertCount(1, $options);
+        $this->assertArrayHasKey(settings_provider::USE_SEB_NO, $options);
+
+        assign_capability('quizaccess/seb:manage_seb_configuremanually', CAP_ALLOW, $this->roleid, $this->context->id);
+        assign_capability('quizaccess/seb:manage_seb_allowuserquitseb', CAP_ALLOW, $this->roleid, $this->context->id);
+        assign_capability('quizaccess/seb:manage_seb_quitpassword', CAP_ALLOW, $this->roleid, $this->context->id);
+        $options = settings_provider::get_requiresafeexambrowser_options($this->context);
+        $this->assertCount(2, $options);
+        $this->assertArrayHasKey(settings_provider::USE_SEB_NO, $options);
+        $this->assertArrayHasKey(settings_provider::USE_SEB_CONFIG_MANUALLY, $options);
+
+        assign_capability('quizaccess/seb:manage_seb_usesebclientconfig', CAP_ALLOW, $this->roleid, $this->context->id);
+        $options = settings_provider::get_requiresafeexambrowser_options($this->context);
+        $this->assertCount(3, $options);
+        $this->assertArrayHasKey(settings_provider::USE_SEB_NO, $options);
+        $this->assertArrayHasKey(settings_provider::USE_SEB_CONFIG_MANUALLY, $options);
+        $this->assertArrayHasKey(settings_provider::USE_SEB_CLIENT_CONFIG, $options);
+
+        assign_capability('quizaccess/seb:manage_seb_templateid', CAP_ALLOW, $this->roleid, $this->context->id);
+        $this->create_template();
+        $options = settings_provider::get_requiresafeexambrowser_options($this->context);
+        $this->assertCount(4, $options);
+        $this->assertArrayHasKey(settings_provider::USE_SEB_NO, $options);
+        $this->assertArrayHasKey(settings_provider::USE_SEB_CONFIG_MANUALLY, $options);
+        $this->assertArrayHasKey(settings_provider::USE_SEB_CLIENT_CONFIG, $options);
+        $this->assertArrayHasKey(settings_provider::USE_SEB_TEMPLATE, $options);
+
+        assign_capability('quizaccess/seb:manage_filemanager_sebconfigfile', CAP_ALLOW, $this->roleid, $this->context->id);
+        $options = settings_provider::get_requiresafeexambrowser_options($this->context);
         $this->assertCount(5, $options);
-        $this->assertTrue(array_key_exists(settings_provider::USE_SEB_TEMPLATE, $options));
+        $this->assertArrayHasKey(settings_provider::USE_SEB_NO, $options);
+        $this->assertArrayHasKey(settings_provider::USE_SEB_CONFIG_MANUALLY, $options);
+        $this->assertArrayHasKey(settings_provider::USE_SEB_CLIENT_CONFIG, $options);
+        $this->assertArrayHasKey(settings_provider::USE_SEB_TEMPLATE, $options);
+        $this->assertArrayHasKey(settings_provider::USE_SEB_UPLOAD_CONFIG, $options);
     }
 
     /**

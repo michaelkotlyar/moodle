@@ -57,11 +57,45 @@ $capabilities = [
             'manager' => CAP_ALLOW,
             'editingteacher' => CAP_ALLOW,
         ],
+    ],
+    'quizaccess/seb:manage_seb_configuremanually_override' => [
+        'captype' => 'write',
+        'contextlevel' => CONTEXT_MODULE,
+        'archetypes' => [
+            'manager' => CAP_ALLOW,
+            'editingteacher' => CAP_ALLOW,
+        ],
+        'clonepermissionsfrom' => 'quizaccess/seb:manage_seb_configuremanually',
+    ],
+    'quizaccess/seb:manage_seb_donotrequiresafeexambrowser' => [
+        'captype' => 'write',
+        'contextlevel' => CONTEXT_MODULE,
+        'archetypes' => [
+            'manager' => CAP_ALLOW,
+            'editingteacher' => CAP_ALLOW,
+        ],
         'clonepermissionsfrom' => 'quizaccess/seb:manage_seb_requiresafeexambrowser',
     ],
     // Ability to select "Yes – Use SEB client config" as an option for "Require the use of Safe Exam Browser".
     'quizaccess/seb:manage_seb_usesebclientconfig' => [
         'captype' => 'read',
+        'contextlevel' => CONTEXT_MODULE,
+        'archetypes' => [
+            'manager' => CAP_ALLOW,
+            'editingteacher' => CAP_ALLOW,
+        ],
+    ],
+    'quizaccess/seb:manage_seb_usesebclientconfig_override' => [
+        'captype' => 'read',
+        'contextlevel' => CONTEXT_MODULE,
+        'archetypes' => [
+            'manager' => CAP_ALLOW,
+            'editingteacher' => CAP_ALLOW,
+        ],
+        'clonepermissionsfrom' => 'quizaccess/seb:manage_seb_usesebclientconfig',
+    ],
+    'quizaccess/seb:manage_seb_donotrequiresafeexambrowser_override' => [
+        'captype' => 'write',
         'contextlevel' => CONTEXT_MODULE,
         'archetypes' => [
             'manager' => CAP_ALLOW,
@@ -76,6 +110,15 @@ $capabilities = [
             'manager' => CAP_ALLOW,
             'editingteacher' => CAP_ALLOW
         ]
+    ],
+    'quizaccess/seb:manage_seb_templateid_override' => [
+        'captype' => 'write',
+        'contextlevel' => CONTEXT_MODULE,
+        'archetypes' => [
+            'manager' => CAP_ALLOW,
+            'editingteacher' => CAP_ALLOW,
+        ],
+        'clonepermissionsfrom' => 'quizaccess/seb:manage_seb_templateid',
     ],
     'quizaccess/seb:manage_filemanager_sebconfigfile' => [
         'captype' => 'write',

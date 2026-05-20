@@ -27,5 +27,5 @@ require_once(__DIR__ . '/../../../../config.php');
 
 $cmid = required_param('cmid', PARAM_RAW);
 
-$config = \quizaccess_seb\helper::get_seb_config_content($cmid);
+$config = \quizaccess_seb\helper::get_seb_config_content($cmid, $USER->id);
 \quizaccess_seb\helper::send_seb_config_file($config);
