@@ -17,6 +17,7 @@
 namespace mod_quiz;
 
 use core_component;
+use mod_quiz\form\edit_override_form;
 use mod_quiz\form\preflight_check_form;
 use mod_quiz\local\access_rule_base;
 use mod_quiz\output\renderer;
@@ -48,6 +49,9 @@ class access_manager {
     /** @var access_rule_base instances of the active rules for this quiz. */
     protected $rules = [];
 
+    /** @var array list of override rule controller objects. */
+    protected $overriderules = [];
+
     /**
      * Create an instance for a particular quiz.
      *
@@ -57,10 +61,11 @@ class access_manager {
      * @param bool $canignoretimelimits Whether this user is exempt from time
      *      limits (has_capability('mod/quiz:ignoretimelimits', ...)).
      */
-    public function __construct(quiz_settings $quizobj, int $timenow, bool $canignoretimelimits) {
+    public function __construct(quiz_settings $quizobj, int $timenow, bool $canignoretimelimits, $userid = null) {
         $this->quizobj = $quizobj;
         $this->timenow = $timenow;
-        $this->rules = $this->make_rules($quizobj, $timenow, $canignoretimelimits);
+        $this->rules = $this->make_rules($quizobj, $timenow, $canignoretimelimits, $userid);
+        $this->overriderules = $this->make_override_rules();
     }
 
     /**
@@ -261,9 +266,10 @@ class access_manager {
      * settings are stored in the quiz table.
      *
      * @param int $quizid the quiz id.
+     * @param ?int $userid the user id, provide if loading effective quiz settings for a particular user
      * @return stdClass mdl_quiz row with extra fields.
      */
-    public static function load_quiz_and_settings(int $quizid): stdClass {
+    public static function load_quiz_and_settings(int $quizid, ?int $userid = null): stdClass {
         global $DB;
 
         $rules = self::get_rule_classes();
@@ -274,6 +280,10 @@ class access_manager {
             foreach ($rule::get_extra_settings($quizid) as $name => $value) {
                 $quiz->$name = $value;
             }
+        }
+
+        if ($userid) {
+            $quiz = quiz_update_effective_access($quiz, $userid);
         }
 
         return $quiz;
@@ -582,5 +592,236 @@ class access_manager {
             }
         }
         return $errors;
+    }
+
+    /**
+     * Get the list of overridable access rule classes.
+     *
+     * Looks for quizaccess_[plugin]/overrides_controller classes and returns a list of instantiated objects. These classes
+     * must extend from the {@see mod_quiz\local\access_rule_overrides_controller_base} class.
+     *
+     * @see mod_quiz\local\access_rule_overrides_controller_base
+     * @return array a list of access rule override controllers
+     */
+    protected function make_override_rules(): array {
+        $rulelist = [];
+        foreach (core_component::get_plugin_list_with_class('quizaccess', 'overrides_controller') as $rule) {
+            $rulelist[] = new $rule($this->quizobj);
+        }
+        return $rulelist;
+    }
+
+    /**
+     * Add override form fields from access rule plugins.
+     *
+     * We are iterating through each access rule override controller to render their override setting fields,
+     * so to keep the fieldsets seperate, we must add a header field in the beginning of each fieldset.
+     *
+     * @see mod_quiz\form\edit_override_form::definition()
+     * @see mod_quiz\local\access_rule_overrides_controller_base::add_form_fields()
+     * @param edit_override_form $mform
+     * @return bool return true if fields have been added.
+     */
+    public function add_override_form_fields(edit_override_form $mform): bool {
+        $fieldsadded = false;
+        foreach ($this->overriderules as $rule) {
+            if ($rule->add_form_fields($mform)) {
+                $fieldsadded = true;
+            }
+        }
+        return $fieldsadded;
+    }
+
+    /**
+     * Validate the data for the access rule override form fields.
+     *
+     * This will be called within {@see mod_quiz\local\override_manager::validate_data()}
+     * and therein {@see mod_quiz\form\edit_override_form::definition()} to tack on the validation
+     * for access rule plugins.
+     *
+     * @see mod_quiz\local\override_manager::validate_data()
+     * @see mod_quiz\local\access_rule_overrides_controller_base::validate_form_fields()
+     * @param array $errors an array of errors, the key being the name of the error field and the value being the message
+     * @param array $data the submitted form data to validate against
+     * @return array $errors the updated $errors array
+     */
+    public function validate_override_form_fields(array $errors, array $data): array {
+        foreach ($this->overriderules as $rule) {
+            $errors = $rule->validate_form_fields($errors, $data);
+        }
+        return $errors;
+    }
+
+    /**
+     * Save any submitted settings when the quiz override settings form is submitted.
+     *
+     * Each override controller will be called to save override settings, if applicable to the respective access rule.
+     *
+     * @see mod_quiz\local\override_manager::save_override()
+     * @see mod_quiz\local\access_rule_overrides_controller_base::save_settings()
+     * @param stdClass $override data from the override form.
+     */
+    public function save_override_settings(stdClass $override): void {
+        foreach ($this->overriderules as $rule) {
+            $rule->save_settings($override);
+        }
+    }
+
+    /**
+     * Delete any access rule specific override settings when the quiz override is deleted.
+     *
+     * Each override controller will be called to delete settings relating to each override, if applicable to the
+     * respective access rule.
+     *
+     * @see mod_quiz\local\override_manager::delete_overrides()
+     * @see mod_quiz\local\access_rule_overrides_controller_base::delete_settings()
+     * @param array $overrides an array of override objects to be deleted.
+     */
+    public function delete_override_settings(array $overrides): void {
+        foreach ($this->overriderules as $rule) {
+            $rule->delete_settings($overrides);
+        }
+    }
+
+    /**
+     * Get components of the SQL query to fetch the access rule components' override settings.
+     *
+     * This should be only used by the quiz override manager to retrieve override data relating to
+     * access rules.
+     *
+     * @see mod_quiz\local\override_manager
+     * @see mod_quiz\local\access_rule_overrides_controller_base::get_settings_sql()
+     * @param string $overridetablename Name of the table to reference for joins.
+     * @return array 'selects', 'joins' and 'params'.
+     */
+    public function get_override_settings_sql(string $overridetablename = 'o'): array {
+        $allfields = [];
+        $alljoins = [];
+        $allparams = [];
+
+        foreach ($this->overriderules as $rule) {
+            [$fields, $joins, $params] = $rule->get_settings_sql($overridetablename);
+            $allfields = array_merge($allfields, $fields);
+            $alljoins = array_merge($alljoins, $joins);
+            $allparams = array_merge($allparams, $params);
+        }
+
+        $allfields = implode(', ', $allfields);
+        $alljoins = implode(' ', $alljoins);
+
+        return [$allfields, $alljoins, $allparams];
+    }
+
+    /**
+     * Get override settings and values for a user from the access rule override controllers.
+     *
+     * User must belong to the quiz the access manager is instantiated for, and the override settings will be retrieved based on
+     * the override rules made in {@see make_override_rules()}. If no overrride specefic values are found, return the default
+     * values for the access rules, if applicable. This will be used by the quiz override manager when fetching the effective
+     * override settings for a user.
+     *
+     * @see mod_quiz\local\override_manager::get_user_override()
+     * @param int $userid Get override settings for this user id.
+     * @return array
+     */
+    public function get_override_settings(int $userid): array {
+        $settings = [];
+        $useroverriderules = $this->make_override_rules();
+        foreach ($useroverriderules as $rule) {
+            if ($rulesettings = $rule->get_settings($userid)) {
+                $settings = array_merge($settings, $rulesettings);
+            }
+        }
+        return $settings;
+    }
+
+    /**
+     * Retrieve names of all access rule override fields to be used in the override form.
+     *
+     * Names of the access rule settings must be unique amongst other quiz access rule settings, so will generally be
+     * prefixed by the access rule plugin name.
+     *
+     * @see mod_quiz\local\override_manager::get_override_setting_names()
+     * @see mod_quiz\local\access_rule_overrides_controller_base::get_setting_names()
+     * @return string[] $settings A string array of setting names, typically prefixed with the respective access rule plugin name
+     */
+    public function get_override_setting_names(): array {
+        $keys = [];
+        foreach ($this->overriderules as $rule) {
+            $keys += $rule->get_setting_names();
+        }
+        return $keys;
+    }
+
+    /**
+     * Retrieve names of required access rule override fields to be used in the override form.
+     *
+     * These settings must be a subset of {@see get_override_setting_names()}. Names of the access rule settings
+     * must be unique, so will generally be prefixed by the access rule plugin name.
+     *
+     * @see mod_quiz\local\override_manager::validate_data()
+     * @see mod_quiz\local\access_rule_overrides_controller_base::get_required_setting_names()
+     * @return string[] $settings A string array of setting names, typically prefixed with the respective access rule plugin name
+     */
+    public function get_override_required_setting_names(): array {
+        $keys = [];
+        foreach ($this->overriderules as $rule) {
+            $keys += $rule->get_required_setting_names();
+        }
+        return $keys;
+    }
+
+    /**
+     * Clean override form data specifc to access rule.
+     *
+     * We clean the form data for each access rule in the case that key values are 'empty' or will have no effect in the override.
+     * This is to ensure that on form submission, the validation can check that any override settings are actually filled in.
+     *
+     * @see mod_quiz\local\override_manager::clear_unused_values()
+     * @see mod_quiz\local\access_rule_overrides_controller_base::clean_form_data()
+     * @param array $formdata
+     * @return array cleaned form data
+     */
+    public function clean_override_form_data(array $formdata): array {
+        foreach ($this->overriderules as $rule) {
+            $formdata = $rule->clean_form_data($formdata);
+        }
+        return $formdata;
+    }
+
+    /**
+     * Add fields and values of the of overridden access rules to be displayed on the override HTML table.
+     *
+     * This will be used by the quiz override manager when viewing the overrides.php page.
+     *
+     * @see mod_quiz\local\override_manager::add_table_fields()
+     * @see mod_quiz\local\access_rule_overrides_controller_base::add_table_fields()
+     * @param stdClass $override the override data to use to update the $fields and $values.
+     * @param array $fields the access rule fields to display.
+     * @param array $values the value of the field at the same index.
+     * @return array an array of the updated fields and values, e.g. [$fields, $values]
+     */
+    public function add_override_table_fields(stdClass $override, array $fields, array $values): array {
+        foreach ($this->overriderules as $rule) {
+            [$fields, $values] = $rule->add_table_fields($override, $fields, $values);
+        }
+        return [$fields, $values];
+    }
+
+    /**
+     * Combine override settings from user and group overrides.
+     *
+     * Called by the override manager when fetching the effective override settings for a user.
+     *
+     * @see mod_quiz\local\override_manager::get_effective_override()
+     * @param stdClass $override The current override object.
+     * @param array $groupoverrides The list of group overrides for this quiz.
+     * @return stdClass $override The combined override settings object altered by the respective access rule.
+     */
+    public function combine_group_overrides(stdClass $override, array $groupoverrides): stdClass {
+        foreach ($this->overriderules as $rule) {
+            $override = $rule->combine_group_overrides($override, $groupoverrides);
+        }
+        return $override;
     }
 }

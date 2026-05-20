@@ -16,16 +16,23 @@
 
 namespace mod_quiz\local;
 
-use context_course;
+use cm_info;
+use core\context\course as context_course;
+use core\context\module as context_module;
 use core_group\hook\after_group_membership_added;
 use core_group\hook\after_group_membership_removed;
+use core_user\fields;
+use mod_quiz_mod_form;
+use mod_quiz\access_manager;
 use mod_quiz\event\group_override_created;
 use mod_quiz\event\group_override_deleted;
 use mod_quiz\event\group_override_updated;
 use mod_quiz\event\user_override_created;
 use mod_quiz\event\user_override_deleted;
 use mod_quiz\event\user_override_updated;
+use mod_quiz\form\edit_override_form;
 use mod_quiz\quiz_settings;
+use stdClass;
 
 /**
  * Manager class for quiz overrides
@@ -38,26 +45,36 @@ class override_manager {
     /** @var array quiz setting keys that can be overwritten **/
     private const OVERRIDEABLE_QUIZ_SETTINGS = ['timeopen', 'timeclose', 'timelimit', 'attempts', 'password'];
 
+    /** @var access_manager The quiz access manager **/
+    protected access_manager $accessmanager;
+
+    /** @var cm_info|stdClass The quiz course module object related to the quiz */
+    protected readonly cm_info|stdClass $cm;
+
+    /** @var stdClass The quiz course object related to the quiz */
+    protected readonly stdClass $course;
+
+    /** @var stdClass The quiz linked to this manager instance **/
+    protected readonly stdClass $quiz;
+
+    /** @var context_module The context being operated in **/
+    public readonly context_module $context;
+
     /**
      * Create override manager
      *
-     * @param \stdClass $quiz The quiz to link the manager to.
-     * @param \context_module $context Context being operated in
+     * @param quiz_settings $quizobj The information of the quiz required by the override manager
      */
-    public function __construct(
-        /** @var \stdClass The quiz linked to this manager instance **/
-        protected readonly \stdClass $quiz,
-        /** @var \context_module The context being operated in **/
-        public readonly \context_module $context
-    ) {
+    public function __construct(quiz_settings &$quizobj) {
         global $CFG;
         // Required for quiz_* methods.
         require_once($CFG->dirroot . '/mod/quiz/locallib.php');
 
-        // Sanity check that the context matches the quiz.
-        if (empty($quiz->cmid) || $quiz->cmid != $context->instanceid) {
-            throw new \coding_exception("Given context does not match the quiz object");
-        }
+        $this->quiz = $quizobj->get_quiz();
+        $this->context = $quizobj->get_context();
+        $this->cm = $quizobj->get_cm();
+        $this->course = $quizobj->get_course();
+        $this->accessmanager = $quizobj->get_access_manager(time());
     }
 
     /**
@@ -72,8 +89,12 @@ class override_manager {
 
     /**
      * Validates the data, usually from a moodleform or a webservice call.
-     * If it contains an 'id' property, additional validation is performed against the existing record.
      *
+     * If it contains an 'id' property, additional validation is performed against the existing record.
+     * Calls {@see mod_quiz\access_manager::validate_override_form_fields()} to validate access rule plugin specific
+     * override setttings.
+     *
+     * @see mod_quiz\access_manager::validate_override_form_fields()
      * @param array $formdata data from moodleform or webservice call.
      * @return array array where the keys are error elements, and the values are lists of errors for each element.
      */
@@ -85,14 +106,16 @@ class override_manager {
         // is parsed in the same way.
         $formdata = $this->parse_formdata($formdata);
 
+        $data = $formdata;
         $formdata = (object) $formdata;
 
         $errors = [];
 
         // Ensure at least one of the overrideable settings is set.
+        $requiredkeys = $this->get_override_required_setting_names();
         $keysthatareset = array_map(function ($key) use ($formdata) {
             return isset($formdata->$key) && !is_null($formdata->$key);
-        }, self::OVERRIDEABLE_QUIZ_SETTINGS);
+        }, $requiredkeys);
 
         $hasoverridevalues = in_array(true, $keysthatareset, true);
 
@@ -173,6 +196,9 @@ class override_manager {
             $errors[$key] = implode(",", $value);
         }
 
+        // Apply access rule plugin validation.
+        $errors = $this->accessmanager->validate_override_form_fields($errors, $data);
+
         return $errors;
     }
 
@@ -226,7 +252,8 @@ class override_manager {
      */
     public function parse_formdata(array $formdata): array {
         // Get the data from the form that we want to update.
-        $settings = array_intersect_key($formdata, array_flip(self::OVERRIDEABLE_QUIZ_SETTINGS));
+        $keys = $this->get_override_setting_names();
+        $settings = array_intersect_key($formdata, array_flip($keys));
 
         // Remove values that are the same as currently in the quiz.
         $settings = $this->clear_unused_values($settings);
@@ -274,6 +301,8 @@ class override_manager {
             $id = $DB->insert_record('quiz_overrides', $datatoset);
         }
 
+        $datatoset['overrideid'] = $id;
+
         $userid = $datatoset['userid'] ?? null;
         $groupid = $datatoset['groupid'] ?? null;
 
@@ -305,6 +334,9 @@ class override_manager {
             quiz_update_events($this->quiz, (object) $datatoset);
         }
 
+        // Update access-rule override data.
+        $this->accessmanager->save_override_settings((object) $datatoset);
+
         return $id;
     }
 
@@ -330,17 +362,11 @@ class override_manager {
     public function delete_overrides_by_id(array $ids, bool $shouldlog = true): void {
         global $DB;
 
-        $quizsettings = quiz_settings::create($this->quiz->id);
-
         // Filter for those overrides user can access.
         [$sql, $params] = self::get_override_in_sql($this->quiz->id, $ids);
         $records = array_filter(
             $DB->get_records_select('quiz_overrides', $sql, $params, '', 'id,quiz,userid,groupid'),
-            fn(\stdClass $override) => $this->can_view_override(
-                $override,
-                $quizsettings->get_course(),
-                $quizsettings->get_cm(),
-            ),
+            fn(stdClass $override) => $this->can_view_override($override),
         );
 
         // Ensure all the given ids exist, so the user is aware if they give a dodgy id.
@@ -418,6 +444,9 @@ class override_manager {
                 $this->fire_deleted_event($override->id, $userid, $groupid);
             }
         }
+
+        // Delete quizaccess rule override data.
+        $this->accessmanager->delete_override_settings($overrides);
     }
 
     /**
@@ -489,16 +518,14 @@ class override_manager {
     /**
      * Determine whether user can view a given override record
      *
-     * @param \stdClass $override
-     * @param \stdClass $course
-     * @param \cm_info $cm
+     * @param stdClass $override An object containing at least a userid or groupid property.
      * @return bool
      */
-    public function can_view_override(\stdClass $override, \stdClass $course, \cm_info $cm): bool {
+    public function can_view_override(stdClass $override): bool {
         if ($override->groupid) {
-            return groups_group_visible($override->groupid, $course, $cm);
+            return groups_group_visible($override->groupid, $this->course, $this->cm);
         } else {
-            return groups_user_groups_visible($course, $override->userid, $cm);
+            return groups_user_groups_visible($this->course, $override->userid, $this->cm);
         }
     }
 
@@ -621,6 +648,8 @@ class override_manager {
             }
         }
 
+        $formdata = $this->accessmanager->clean_override_form_data($formdata);
+
         return $formdata;
     }
 
@@ -725,5 +754,551 @@ class override_manager {
      */
     public static function after_group_membership_removed(after_group_membership_removed $hook): void {
         quiz_overrides_cache_manager::purge_for_group_members($hook->groupinstance->id, $hook->userids);
+    }
+
+    /**
+     * Determine if the user can view all groups in the quiz.
+     *
+     * Used to help fetch the groups the user is allowed to see.
+     *
+     * @link ../../overrides.php
+     * @return bool $showallgroups True if the user has access to all groups in the course.
+     */
+    public function can_showallgroups(): bool {
+        return groups_get_activity_groupmode($this->cm) === NOGROUPS
+            || has_capability('moodle/site:accessallgroups', $this->context);
+    }
+
+    /**
+     * Get the groups the user is able to view in the override manager.
+     *
+     * The function checks if the user can view all groups, if so can fetch all groups in the course, otherwise
+     * will fetch groups the user is allowed to see in the activity.
+     *
+     * @link ../../overrides.php
+     * @return array $groups A list of group objects in the quiz, returns an empty array if no groups found.
+     */
+    public function get_groups(): array {
+        $groups = $this->can_showallgroups()
+            ? groups_get_all_groups($this->course->id)
+            : groups_get_activity_allowed_groups($this->cm);
+        return $groups ?: [];
+    }
+
+    /**
+     * Get override by ID.
+     *
+     * Adds properties of access rule plugin overrides. The override object belong to the quiz the override manager belong.
+     *
+     * @link ../../overrides.php
+     * @param int $overrideid The ID of the override record in the quiz_overrides table.
+     * @param int $strictness One of IGNORE_MISSING or MUST_EXIST.
+     * @return ?stdClass $override The override object, returns null if no override found and $strictness is set to IGNORE_MISSING.
+     * @throws \dml_exception if quiz_overrides record not found and respective $strictness is set.
+     */
+    public function get_override_by_id(int $overrideid, int $strictness = MUST_EXIST): ?stdClass {
+        global $DB;
+        [$accessselects, $accessjoins, $accessparams] = $this->accessmanager->get_override_settings_sql();
+        $accessrulesqlselects = !empty($accessselects) ? ", $accessselects" : '';
+        $sql = "SELECT o.* {$accessrulesqlselects}
+                FROM {quiz_overrides} o
+                {$accessjoins}
+                WHERE o.id = ? AND o.quiz = ?";
+        $accessparams[] = $overrideid;
+        $accessparams[] = $this->quiz->id;
+        return $DB->get_record_sql($sql, $accessparams, $strictness) ?: null;
+    }
+
+    /**
+     * Get the override settings of a user in the quiz.
+     *
+     * Looks through user targeted overrides first, then checks for group overrides that will apply to the user.
+     *
+     * @see self::get_effective_override() to get the combined override settings for a user.
+     * @param int $userid user ID. Must be a user that is enrolled in the course of the override manager quiz.
+     * @return ?stdClass
+     */
+    protected function get_user_override(int $userid): ?stdClass {
+        global $DB;
+
+        $override = $DB->get_record('quiz_overrides', ['quiz' => $this->quiz->id, 'userid' => $userid]) ?: null;
+
+        if ($override) {
+            $accessruleoverridesettings = $this->accessmanager->get_override_settings($userid);
+            $override = (object) array_merge((array) $override, $accessruleoverridesettings);
+        }
+
+        return $override;
+    }
+
+    /**
+     * Fetches the effective override for a user in the quiz, taking into account user and group targeted overrides.
+     *
+     * If the user has a user-targeted override, properties from that override will be used. For any setting not specified in the
+     * user-targeted override, the group-targeted overrides will be checked and applied. If multiple group-targeted overrides
+     * apply to the user and specify a value for the same setting, the most lenient value will be used (e.g. latest close time,
+     * earliest open time, highest attempts allowed, etc.).
+     *
+     * @link ../../lib.php calls quiz_update_effective_access() to fetch the override settings for a user.
+     * @param int $userid The ID of the user fetch the quiz override for.
+     * @return stdClass $override The final override settings object.
+     */
+    public function get_effective_override(int $userid): stdClass {
+        // Check for user override.
+        $override = $this->get_user_override($userid);
+
+        if (!$override) {
+            $override = (object) [
+                'timeopen' => null,
+                'timeclose' => null,
+                'timelimit' => null,
+                'attempts' => null,
+                'password' => null,
+            ];
+        }
+
+        // Check for group overrides.
+        $gpoverrides = $this->get_group_overrides($userid);
+
+        if ($gpoverrides) {
+            // Combine the overrides.
+            $opens = [];
+            $closes = [];
+            $limits = [];
+            $attempts = [];
+            $passwords = [];
+
+            foreach ($gpoverrides as $gpoverride) {
+                if (isset($gpoverride->timeopen)) {
+                    $opens[] = $gpoverride->timeopen;
+                }
+                if (isset($gpoverride->timeclose)) {
+                    $closes[] = $gpoverride->timeclose;
+                }
+                if (isset($gpoverride->timelimit)) {
+                    $limits[] = $gpoverride->timelimit;
+                }
+                if (isset($gpoverride->attempts)) {
+                    $attempts[] = $gpoverride->attempts;
+                }
+                if (isset($gpoverride->password)) {
+                    $passwords[] = $gpoverride->password;
+                }
+            }
+            // If there is a user override for a setting, ignore the group override.
+            if (is_null($override->timeopen) && count($opens)) {
+                $override->timeopen = min($opens);
+            }
+            if (is_null($override->timeclose) && count($closes)) {
+                if (in_array(0, $closes)) {
+                    $override->timeclose = 0;
+                } else {
+                    $override->timeclose = max($closes);
+                }
+            }
+            if (is_null($override->timelimit) && count($limits)) {
+                if (in_array(0, $limits)) {
+                    $override->timelimit = 0;
+                } else {
+                    $override->timelimit = max($limits);
+                }
+            }
+            if (is_null($override->attempts) && count($attempts)) {
+                if (in_array(0, $attempts)) {
+                    $override->attempts = 0;
+                } else {
+                    $override->attempts = max($attempts);
+                }
+            }
+            if (is_null($override->password) && count($passwords)) {
+                $override->password = array_shift($passwords);
+                if (count($passwords)) {
+                    $override->extrapasswords = $passwords;
+                }
+            }
+
+            // Combine with access rule plugin override settings as well.
+            $override = $this->accessmanager->combine_group_overrides($override, $gpoverrides);
+        }
+
+        return $override;
+    }
+
+    /**
+     * Provide a list of group overrides in the quiz.
+     *
+     * Retrieves group overrides for user-targeted or all group overrides in the quiz. Used by quiz_update_effective_access()
+     * in overrides.php to fetch all group overrides in the quiz and in {@see self::get_effective_override()} to check
+     * for group overrides that apply to a given user.
+     *
+     * @link ../../overrides.php
+     * @see self::get_effective_override()
+     * @param ?int $userid the ID of the user the group overrides apply. If null, will retrieve all group overrides in the quiz.
+     * @return array A list of group override objects. Returns an empty array if no group overrides found.
+     */
+    public function get_group_overrides(?int $userid = null): array {
+        global $DB;
+
+        // Fetch quiz groups.
+        $groups = [];
+        if ($userid) {
+            // If user specified, only fetch groups the user belongs to.
+            $groups = groups_get_user_groups($this->course->id, $userid, true);
+            $groups = $groups ? $groups[0] : [];
+        } else {
+            // If no user specified, fetch all groups in the quiz.
+            $groups = $this->get_groups();
+            $groups = array_keys($groups);
+        }
+
+        // If no groups, return empty array.
+        if (empty($groups)) {
+            return [];
+        }
+
+        // Build query to fetch the group overrides. Add access rule plugin fields as necessary.
+        $selects = ['o.*, g.name'];
+        [$accessselects, $accessjoins, $accessparams] = $this->accessmanager->get_override_settings_sql();
+        if ($accessselects) {
+            $selects[] = $accessselects;
+        }
+        $selects = implode(', ', $selects);
+        $params = ['quizid' => $this->quiz->id];
+        [$insql, $inparams] = $DB->get_in_or_equal($groups, SQL_PARAMS_NAMED);
+
+        $sql = "SELECT {$selects}
+                  FROM {quiz_overrides} o
+                  JOIN {groups} g ON o.groupid = g.id
+                       {$accessjoins}
+                 WHERE o.quiz = :quizid
+                   AND g.id $insql
+              ORDER BY g.name";
+        $params = array_merge($accessparams, $params, $inparams);
+
+        return $DB->get_records_sql($sql, $params) ?: [];
+    }
+
+    /**
+     * Provide a list of user targeted overrides for the current quiz.
+     *
+     * Used in the overrides.php page to fetch user overrides.
+     *
+     * @link ../../overrides.php
+     * @return array $overrides The list of user targeted overrides in the quiz, returns an empty array if no user overrides found.
+     */
+    public function get_user_overrides(): array {
+        global $DB;
+
+        $userfieldsapi = fields::for_identity($this->context)->with_name()->with_userpic();
+        $extrauserfields = $userfieldsapi->get_required_fields([fields::PURPOSE_IDENTITY]);
+        $userfieldssql = $userfieldsapi->get_sql('u', true, '', 'userid', false);
+
+        $overrides = [];
+        [$accessselects, $accessjoins, $accessparams] = $this->accessmanager->get_override_settings_sql();
+        [$sort, $params] = users_order_by_sql('u', null, $this->context, $extrauserfields);
+        $params['quizid'] = $this->quiz->id;
+
+        if ($this->can_showallgroups()) {
+            $groupsjoin = '';
+            $groupswhere = '';
+        } else if ($groups = $this->get_groups()) {
+            [$insql, $inparams] = $DB->get_in_or_equal(array_keys($groups), SQL_PARAMS_NAMED);
+            $groupsjoin = 'JOIN {groups_members} gm ON u.id = gm.userid';
+            $groupswhere = ' AND gm.groupid ' . $insql;
+            $params += $inparams;
+        } else {
+            // User cannot see any data.
+            $groupsjoin = '';
+            $groupswhere = ' AND 1 = 2';
+        }
+        $selects = ['o.*', $userfieldssql->selects];
+        if ($accessselects) {
+            $selects[] = $accessselects;
+        }
+        $selects = implode(', ', $selects);
+
+        $sql = "SELECT {$selects}
+                  FROM {quiz_overrides} o
+                  JOIN {user} u ON u.id = o.userid
+                       {$userfieldssql->joins}
+                       {$accessjoins}
+                       {$groupsjoin}
+                 WHERE o.quiz = :quizid
+                       {$groupswhere}
+              ORDER BY $sort";
+        $params = [...$params, ...$userfieldssql->params, ...$accessparams];
+        $overrides = $DB->get_records_sql($sql, $params);
+
+        return $overrides ?: [];
+    }
+
+    /**
+     * Add override properties to a 2D array of fields and values to be displayed on an HTML table.
+     *
+     * Calls {@see mod_quiz\access_manager::add_override_table_fields()} to display access rule plugin override properties.
+     *
+     * @link ../../overrides.php
+     * @see mod_quiz\access_manager::add_override_table_fields()
+     * @param stdClass $override The override object used to read and display properties of in the table.
+     * @return array [$fields, $values] A 2D array of fields and their respective fields.
+     */
+    public function add_table_fields(stdClass $override): array {
+        // Prepare the information about which settings are overridden.
+        $fields = [];
+        $values = [];
+
+        // Format timeopen.
+        if (isset($override->timeopen)) {
+            $fields[] = get_string('quizopens', 'quiz');
+            $values[] = $override->timeopen > 0 ?
+                    userdate($override->timeopen) : get_string('noopen', 'quiz');
+        }
+        // Format timeclose.
+        if (isset($override->timeclose)) {
+            $fields[] = get_string('quizcloses', 'quiz');
+            $values[] = $override->timeclose > 0 ?
+                    userdate($override->timeclose) : get_string('noclose', 'quiz');
+        }
+        // Format timelimit.
+        if (isset($override->timelimit)) {
+            $fields[] = get_string('timelimit', 'quiz');
+            $values[] = $override->timelimit > 0 ?
+                    format_time($override->timelimit) : get_string('none', 'quiz');
+        }
+        // Format number of attempts.
+        if (isset($override->attempts)) {
+            $fields[] = get_string('attempts', 'quiz');
+            $values[] = $override->attempts > 0 ?
+                    $override->attempts : get_string('unlimited');
+        }
+        // Format password.
+        if (isset($override->password)) {
+            $fields[] = get_string('requirepassword', 'quiz');
+            $values[] = $override->password !== '' ?
+                    get_string('enabled', 'quiz') : get_string('none', 'quiz');
+        }
+
+        // Add access rule plugin table fields and values.
+        [$fields, $values] = $this->accessmanager->add_override_table_fields($override, $fields, $values);
+
+        // Format reason.
+        if (isset($override->reason) && $override->reason !== '') {
+            $formattedreason = format_text(
+                $override->reason,
+                $override->reasonformat ?? FORMAT_MOODLE,
+                ['context' => $this->context],
+            );
+
+            if ($formattedreason !== '') {
+                $fields[] = get_string('overridereason', 'quiz');
+                $values[] = $formattedreason;
+            }
+        }
+
+        return [$fields, $values];
+    }
+
+    /**
+     * Return the override setting property names.
+     *
+     * Includes the baseline overridable quiz settings, but adds the "extrapasswords" field and settings names from other access
+     * rule plugins. Used in the quiz_update_effective_access() function in to ensure the user is correctly accessing the quiz.
+     *
+     * @see mod_quiz\access_manager::get_override_setting_names()
+     * @link ../../lib.php
+     * @return array $settingnames An array of strings of override setting property names that can be set.
+     */
+    public function get_override_setting_names(): array {
+        return array_merge(
+            self::OVERRIDEABLE_QUIZ_SETTINGS,
+            ['extrapasswords'],
+            $this->accessmanager->get_override_setting_names(),
+        );
+    }
+
+    /**
+     * Return the required override setting property names.
+     *
+     * Used to validate the {@see mod_quiz\form\edit_override_form} when adding or updating an override, making sure that
+     * at least one of these fields are filled in. The validation is performed at {@see self::validate_data()}. Includes required
+     * setting names provided by overridable access rule plugins.
+     *
+     * @see self::validate_data()
+     * @see self::OVERRIDEABLE_QUIZ_SETTINGS
+     * @see mod_quiz\access_manager::get_override_required_setting_names()
+     * @return string[]
+     */
+    public function get_override_required_setting_names(): array {
+        return array_merge(
+            self::OVERRIDEABLE_QUIZ_SETTINGS,
+            $this->accessmanager->get_override_required_setting_names(),
+        );
+    }
+
+    /**
+     * Add fields for use on the override edit form.
+     *
+     * Focuses on quiz specifc override fields outside of the base form fields in
+     * {@see mod_quiz\form\edit_override_form::definition()}. Calls {@see mod_quiz\access_manager::add_override_form_fields()} to
+     * add form fields from overridable access rule plugins.
+     *
+     * @see mod_quiz\form\edit_override_form::definition()
+     * @see mod_quiz\access_manager::add_override_form_fields()
+     * @param edit_override_form $form
+     */
+    public function add_edit_override_form_fields(edit_override_form $form): void {
+        global $DB;
+        $mform = $form->get_form();
+        $groupmode = $form->groupmode;
+        $groupid = $form->override->groupid ?? null;
+        $userid = $form->override->userid ?? null;
+        $accessallgroups = $this->can_showallgroups();
+
+        if ($groupmode) {
+            // Group override.
+            if ($groupid) {
+                // There is already a groupid, so freeze the selector.
+                $groupchoices = [
+                    $groupid => format_string(groups_get_group_name($groupid), true, ['context' => $this->context]),
+                ];
+                $mform->addElement('select', 'groupid', get_string('overridegroup', 'quiz'), $groupchoices);
+                $mform->freeze('groupid');
+            } else {
+                // Prepare the list of groups.
+                // Only include the groups the current can access.
+                $groups = $this->get_groups();
+                if (empty($groups)) {
+                    // Generate an error.
+                    $link = new \moodle_url('/mod/quiz/overrides.php', ['cmid' => $this->cm->id]);
+                    throw new \moodle_exception('groupsnone', 'quiz', $link);
+                }
+
+                $groupchoices = [];
+                foreach ($groups as $group) {
+                    if ($group->visibility != GROUPS_VISIBILITY_NONE) {
+                        $groupchoices[$group->id] = format_string($group->name, true, ['context' => $this->context]);
+                    }
+                }
+                unset($groups);
+
+                if (count($groupchoices) == 0) {
+                    $groupchoices[0] = get_string('none');
+                }
+
+                $mform->addElement('select', 'groupid', get_string('overridegroup', 'quiz'), $groupchoices);
+                $mform->addRule('groupid', get_string('required'), 'required', null, 'client');
+            }
+        } else {
+            // User override.
+            $userfieldsapi = fields::for_identity($this->context)->with_userpic()->with_name();
+            $extrauserfields = $userfieldsapi->get_required_fields([fields::PURPOSE_IDENTITY]);
+            if ($userid) {
+                // There is already a userid, so freeze the selector.
+                $user = $DB->get_record('user', ['id' => $userid]);
+                profile_load_custom_fields($user);
+                $userchoices = [];
+                $userchoices[$userid] = $form::display_user_name($user, $extrauserfields);
+                $mform->addElement('select', 'userid', get_string('overrideuser', 'quiz'), $userchoices);
+                $mform->freeze('userid');
+            } else {
+                // Prepare the list of users.
+                $groupids = 0;
+                if (!$accessallgroups) {
+                    $groups = groups_get_activity_allowed_groups($this->cm);
+                    $groupids = array_keys($groups);
+                }
+                $enrolledjoin = get_enrolled_with_capabilities_join($this->context, '', 'mod/quiz:attempt', $groupids, true);
+                $userfieldsql = $userfieldsapi->get_sql('u', true, '', '', false);
+                [$sort, $sortparams] = users_order_by_sql('u', null, $this->context, $userfieldsql->mappings);
+
+                $users = $DB->get_records_sql(
+                    "SELECT DISTINCT $userfieldsql->selects
+                                FROM {user} u
+                                     $enrolledjoin->joins
+                                     $userfieldsql->joins
+                           LEFT JOIN {quiz_overrides} existingoverride
+                                  ON existingoverride.userid = u.id
+                                 AND existingoverride.quiz = :quizid
+                               WHERE existingoverride.id IS NULL
+                                 AND $enrolledjoin->wheres
+                            ORDER BY $sort",
+                    array_merge(
+                        ['quizid' => $this->quiz->id],
+                        $userfieldsql->params,
+                        $enrolledjoin->params,
+                        $sortparams,
+                    ),
+                );
+
+                // Filter users based on any fixed restrictions (groups, profile).
+                $cm = is_object($this->cm) ? cm_info::create($this->cm) : $this->cm;
+                $cminfo = new \core_availability\info_module($cm);
+                $users = $cminfo->filter_user_list($users);
+
+                if (empty($users)) {
+                    // Generate an error.
+                    $link = new \moodle_url('/mod/quiz/overrides.php', ['cmid' => $this->cm->id]);
+                    throw new \moodle_exception('usersnone', 'quiz', $link);
+                }
+
+                $userchoices = [];
+                foreach ($users as $id => $user) {
+                    $userchoices[$id] = $form::display_user_name($user, $extrauserfields);
+                }
+                unset($users);
+
+                $mform->addElement('searchableselector', 'userid', get_string('overrideuser', 'quiz'), $userchoices);
+                $mform->addRule('userid', get_string('required'), 'required', null, 'client');
+            }
+        }
+
+        // Password.
+        // This field has to be above the date and timelimit fields,
+        // otherwise browsers will clear it when those fields are changed.
+        $mform->addElement('passwordunmask', 'password', get_string('requirepassword', 'quiz'));
+        $mform->setType('password', PARAM_TEXT);
+        $mform->addHelpButton('password', 'requirepassword', 'quiz');
+        $mform->setDefault('password', $this->quiz->password);
+
+        // Open and close dates.
+        $mform->addElement('date_time_selector', 'timeopen', get_string('quizopen', 'quiz'), mod_quiz_mod_form::$datefieldoptions);
+        $mform->setDefault('timeopen', $this->quiz->timeopen);
+
+        $mform->addElement(
+            'date_time_selector',
+            'timeclose',
+            get_string('quizclose', 'quiz'),
+            mod_quiz_mod_form::$datefieldoptions,
+        );
+        $mform->setDefault('timeclose', $this->quiz->timeclose);
+
+        // Time limit.
+        $mform->addElement('duration', 'timelimit', get_string('timelimit', 'quiz'), ['optional' => true]);
+        $mform->addHelpButton('timelimit', 'timelimit', 'quiz');
+        $mform->setDefault('timelimit', $this->quiz->timelimit);
+
+        // Number of attempts.
+        $attemptoptions = ['0' => get_string('unlimited')];
+        for ($i = 1; $i <= QUIZ_MAX_ATTEMPT_OPTION; $i++) {
+            $attemptoptions[$i] = $i;
+        }
+        $mform->addElement('select', 'attempts', get_string('attemptsallowed', 'quiz'), $attemptoptions);
+        $mform->addHelpButton('attempts', 'attempts', 'quiz');
+        $mform->setDefault('attempts', $this->quiz->attempts);
+
+        // Access rule plugin override fields.
+        if ($this->accessmanager->add_override_form_fields($form)) {
+            $mform->closeHeaderBefore('reason_editor');
+        }
+
+        // Reason for override.
+        $editoroptions = [
+            'maxfiles' => 0,
+            'noclean' => false,
+            'context' => $this->context,
+        ];
+        $mform->addElement('editor', 'reason_editor', get_string('overridereason', 'quiz'), null, $editoroptions);
+        $mform->setType('reason_editor', PARAM_RAW);
+        $mform->addHelpButton('reason_editor', 'overridereason', 'quiz');
     }
 }
