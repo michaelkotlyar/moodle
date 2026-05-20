@@ -36,8 +36,8 @@ $reset = optional_param('reset', false, PARAM_BOOL);
 
 $override = null;
 if ($overrideid) {
-    $override = $DB->get_record('quiz_overrides', ['id' => $overrideid], '*', MUST_EXIST);
-    $quizobj = quiz_settings::create($override->quiz);
+    $quizid = $DB->get_field('quiz_overrides', 'quiz', ['id' => $overrideid], MUST_EXIST);
+    $quizobj = quiz_settings::create($quizid);
 } else {
     $quizobj = quiz_settings::create_for_cmid($cmid);
 }
@@ -47,6 +47,10 @@ $cm = $quizobj->get_cm();
 $course = $quizobj->get_course();
 $context = $quizobj->get_context();
 $manager = $quizobj->get_override_manager();
+
+if ($overrideid) {
+    $override = $manager->get_override_by_id($overrideid);
+}
 
 $url = new moodle_url('/mod/quiz/overrideedit.php');
 if ($action) {
@@ -73,7 +77,7 @@ if ($overrideid) {
     // Editing an override.
     $data = clone $override;
 
-    if (!$manager->can_view_override($override, $course, $cm)) {
+    if (!$manager->can_view_override($override)) {
         throw new \moodle_exception('invalidoverrideid', 'quiz');
     }
 } else {
@@ -114,7 +118,7 @@ if (!$groupmode) {
 }
 
 // Setup the form.
-$mform = new edit_override_form($url, $cm, $quiz, $context, $groupmode, $override);
+$mform = new edit_override_form($url, $quizobj, $groupmode, $override);
 $mform->set_data($data);
 
 if ($mform->is_cancelled()) {
